@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .asr import resolve_device, transcribe_audio
+from .creators import add_creator_source, list_creator_sources
 from .exporters import write_outputs
 from .library import (
     build_manifest,
@@ -33,6 +34,10 @@ def main(argv: list[str] | None = None) -> None:
     raw_args = sys.argv[1:] if argv is None else argv
     if raw_args and raw_args[0] == "library":
         result = process_library_command(raw_args[1:])
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+    if raw_args and raw_args[0] == "creator":
+        result = process_creator_command(raw_args[1:])
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
 
@@ -100,6 +105,33 @@ def process_library_command(argv: list[str] | None = None) -> dict[str, Any]:
         except Exception as exc:  # noqa: BLE001 - CLI should report cleanly
             print(f"[error] {exc}", file=sys.stderr)
             raise SystemExit(1) from exc
+    raise SystemExit(2)
+
+
+def process_creator_command(argv: list[str] | None = None) -> dict[str, Any]:
+    parser = argparse.ArgumentParser(
+        prog="clipvault creator",
+        description="Manage followed creator sources.",
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    add_parser = subparsers.add_parser("add", help="Record a creator/channel source URL.")
+    add_parser.add_argument("url", help="Creator/channel URL to follow.")
+    add_parser.add_argument("--library", type=Path, default=DEFAULT_LIBRARY, help="Subtitle library root.")
+    add_parser.add_argument("--name", type=str, default=None, help="Display name for this creator.")
+
+    list_parser = subparsers.add_parser("list", help="List recorded creator sources.")
+    list_parser.add_argument("--library", type=Path, default=DEFAULT_LIBRARY, help="Subtitle library root.")
+
+    args = parser.parse_args(argv)
+    try:
+        if args.command == "add":
+            record = add_creator_source(args.library, source_url=args.url, name=args.name)
+            return {"status": "ok", "creator": record}
+        if args.command == "list":
+            return {"status": "ok", "creators": list_creator_sources(args.library)}
+    except Exception as exc:  # noqa: BLE001 - CLI should report cleanly
+        print(f"[error] {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
     raise SystemExit(2)
 
 

@@ -227,12 +227,26 @@ Success criteria:
 
 Goal: support following creators and collecting new videos.
 
+### Phase 5 Step 1 — Creator Source Registry (completed)
+
+Local registry for creator/channel sources:
+
+```powershell
+clipvault creator add <url> --name "Display Name"
+clipvault creator list
+```
+
+- Stores records in `library/_creators.json`.
+- Records platform, display name, source URL, added time, and check state.
+- Adding the same source URL is idempotent and updates the display name.
+- This step does not fetch recent videos yet.
+
 Planned work:
 
-- Add creator/channel source records.
+- ~~Add creator/channel source records.~~
 - Add commands:
-  - `clipvault creator add <url>`.
-  - `clipvault creator list`.
+  - ~~`clipvault creator add <url>`.~~
+  - ~~`clipvault creator list`.~~
   - `clipvault creator fetch <creator>`.
 - Fetch recent videos from a creator/channel.
 - Skip already processed videos.

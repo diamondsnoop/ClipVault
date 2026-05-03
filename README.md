@@ -123,6 +123,12 @@ If index files are deleted, stale, or inconsistent, rebuild them from existing c
 
 # Rebuild creator and series indexes from completed local manifests
 .\clipvault.ps1 library rebuild-index
+
+# Record a creator/channel source for later batch ingestion
+.\clipvault.ps1 creator add "https://www.youtube.com/@Jabzy" --name "Jabzy"
+
+# List recorded creator/channel sources
+.\clipvault.ps1 creator list
 ```
 
 ## Auto Series Rules
@@ -163,6 +169,23 @@ Format:
 - Manually passed ``--series`` always takes priority over auto-rules.
 - This is local title-based matching, not AI recognition and not creator
   subscription.
+
+## Creator Tracking
+
+ClipVault can record creator/channel source URLs for later batch ingestion:
+
+```powershell
+.\clipvault.ps1 creator add "https://www.youtube.com/@Jabzy" --name "Jabzy"
+.\clipvault.ps1 creator list
+```
+
+Creator records are stored locally in:
+
+```text
+library/_creators.json
+```
+
+This is only the source registry. It does not fetch recent videos yet.
 
 ## Repository Hygiene
 

@@ -401,3 +401,43 @@ def test_process_library_rebuild_index_dry_run(tmp_path: Path):
 
     assert result["status"] == "ok"
     assert result["dry_run"] is True
+
+
+# ── Creator tracking CLI ──────────────────────────────────────────────
+
+
+def test_process_creator_add_command(tmp_path: Path):
+    from clipvault.cli import process_creator_command
+
+    result = process_creator_command([
+        "add",
+        "https://www.youtube.com/@Jabzy",
+        "--name",
+        "Jabzy",
+        "--library",
+        str(tmp_path),
+    ])
+
+    assert result["status"] == "ok"
+    assert result["creator"]["platform"] == "youtube"
+    assert result["creator"]["name"] == "Jabzy"
+    assert (tmp_path / "_creators.json").exists()
+
+
+def test_process_creator_list_command(tmp_path: Path):
+    from clipvault.cli import process_creator_command
+
+    process_creator_command([
+        "add",
+        "https://www.youtube.com/@Jabzy",
+        "--name",
+        "Jabzy",
+        "--library",
+        str(tmp_path),
+    ])
+
+    result = process_creator_command(["list", "--library", str(tmp_path)])
+
+    assert result["status"] == "ok"
+    assert len(result["creators"]) == 1
+    assert result["creators"][0]["name"] == "Jabzy"

@@ -56,6 +56,13 @@ Library indexes (auto-maintained):
 - Indexes can be rebuilt from completed manifests with `clipvault library rebuild-index`.
 - Indexes are plain JSON, no database required.
 
+Creator source registry (Phase 5 Step 1):
+
+- `library/_creators.json` stores creator/channel source URLs for later batch ingestion.
+- `clipvault creator add <url> --name "Display Name"` records or updates a source.
+- `clipvault creator list` prints recorded sources.
+- The registry does not fetch recent videos yet.
+
 Not yet implemented:
 
 - GUI.
@@ -155,6 +162,13 @@ Rebuild local indexes without downloading or transcribing:
 ```powershell
 .\clipvault.ps1 library rebuild-index
 .\clipvault.ps1 library rebuild-index --dry-run
+```
+
+Record and list creator/channel sources:
+
+```powershell
+.\clipvault.ps1 creator add "https://www.youtube.com/@Jabzy" --name "Jabzy"
+.\clipvault.ps1 creator list
 ```
 
 ## Manual Platform Samples
