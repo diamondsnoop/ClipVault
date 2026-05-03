@@ -8,10 +8,13 @@ import pytest
 from clipvault.creators import (
     add_creator_source,
     creator_registry_path,
+    enqueue_creator_videos,
     fetch_creator_videos,
     find_creator_source,
+    job_queue_path,
     list_creator_sources,
     load_creator_registry,
+    load_job_queue,
 )
 
 
@@ -161,3 +164,75 @@ def test_fetch_creator_videos_rejects_bad_limit(tmp_path: Path):
 
     with pytest.raises(ValueError, match="limit"):
         fetch_creator_videos(tmp_path, selector="Jabzy", limit=0)
+
+
+def test_enqueue_creator_videos_adds_new_entries(tmp_path: Path, monkeypatch):
+    add_creator_source(tmp_path, source_url="https://www.youtube.com/@Jabzy", name="Jabzy")
+    monkeypatch.setattr(
+        "clipvault.creators.extract_creator_entries",
+        lambda url, *, limit, verbose: [
+            {"id": "v1", "title": "One", "url": "https://youtube.com/watch?v=v1"},
+            {"id": "v2", "title": "Two", "url": "https://youtube.com/watch?v=v2"},
+        ],
+    )
+
+    result = enqueue_creator_videos(tmp_path, selector="Jabzy", limit=2)
+
+    assert result["added_count"] == 2
+    assert job_queue_path(tmp_path).exists()
+    queue = load_job_queue(tmp_path)
+    assert [job["status"] for job in queue["jobs"]] == ["pending", "pending"]
+    assert [job["source_url"] for job in queue["jobs"]] == [
+        "https://youtube.com/watch?v=v1",
+        "https://youtube.com/watch?v=v2",
+    ]
+
+
+def test_enqueue_creator_videos_skips_processed_and_existing(tmp_path: Path, monkeypatch):
+    from clipvault.library import video_directory, write_json
+
+    add_creator_source(tmp_path, source_url="https://www.youtube.com/@Jabzy", name="Jabzy")
+    video_dir = video_directory(tmp_path, platform="youtube", uploader="Jabzy", title="One", video_id="v1")
+    video_dir.mkdir(parents=True)
+    write_json(
+        video_dir / "manifest.json",
+        {
+            "schema_version": 1,
+            "platform": "youtube",
+            "uploader": "Jabzy",
+            "title": "One",
+            "video_id": "v1",
+            "source_url": "https://youtube.com/watch?v=v1",
+            "subtitle_source": "subtitle:en:json3",
+            "output_files": ["transcript.srt", "transcript.txt", "transcript.md"],
+        },
+    )
+    (video_dir / "transcript.srt").write_text("", encoding="utf-8")
+    (video_dir / "transcript.txt").write_text("", encoding="utf-8")
+    (video_dir / "transcript.md").write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        "clipvault.creators.extract_creator_entries",
+        lambda url, *, limit, verbose: [
+            {"id": "v1", "title": "One", "url": "https://youtube.com/watch?v=v1"},
+            {"id": "v2", "title": "Two", "url": "https://youtube.com/watch?v=v2"},
+        ],
+    )
+
+    first = enqueue_creator_videos(tmp_path, selector="Jabzy", limit=2)
+    second = enqueue_creator_videos(tmp_path, selector="Jabzy", limit=2)
+
+    assert first["added_count"] == 1
+    assert first["skipped_processed"] == 1
+    assert second["added_count"] == 0
+    assert second["skipped_existing"] == 1
+    queue = load_job_queue(tmp_path)
+    assert len(queue["jobs"]) == 1
+
+
+def test_load_job_queue_invalid_shape_is_non_blocking(tmp_path: Path, capsys):
+    job_queue_path(tmp_path).write_text("[]", encoding="utf-8")
+
+    queue = load_job_queue(tmp_path)
+
+    assert queue["jobs"] == []
+    assert "invalid queue shape" in capsys.readouterr().err

@@ -19,6 +19,12 @@ Use these prefixes:
   be read.
 - `[creator] invalid registry shape (<path>), starting empty` — registry file
   exists but does not match the expected shape.
+- `[queue] added: <count>, skipped processed: <count>, skipped existing: <count>`
+  — new creator entries were written to the local job queue.
+- `[queue] path: <path>` — queue file path after a write.
+- `[queue] load failed (<path>): <reason>` — queue JSON could not be read.
+- `[queue] invalid queue shape (<path>), starting empty` — queue file exists
+  but does not match the expected shape.
 
 Creator registry failures should be understandable from the command output.
 Unknown platforms should fail clearly instead of creating ambiguous records.

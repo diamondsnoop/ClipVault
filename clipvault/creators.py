@@ -12,10 +12,15 @@ from .platforms import extract_creator_entries, identify_platform
 
 
 CREATOR_REGISTRY_SCHEMA_VERSION = 1
+JOB_QUEUE_SCHEMA_VERSION = 1
 
 
 def creator_registry_path(library: Path) -> Path:
     return library / "_creators.json"
+
+
+def job_queue_path(library: Path) -> Path:
+    return library / "_queue.json"
 
 
 def _now() -> str:
@@ -60,6 +65,36 @@ def load_creator_registry(library: Path) -> dict[str, Any]:
             "type": "creator_registry",
             "updated_at": None,
             "creators": [],
+        }
+    return data
+
+
+def load_job_queue(library: Path) -> dict[str, Any]:
+    path = job_queue_path(library)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {
+            "schema_version": JOB_QUEUE_SCHEMA_VERSION,
+            "type": "transcript_job_queue",
+            "updated_at": None,
+            "jobs": [],
+        }
+    except (json.JSONDecodeError, OSError) as exc:
+        print(f"[queue] load failed ({path}): {exc}", file=sys.stderr)
+        return {
+            "schema_version": JOB_QUEUE_SCHEMA_VERSION,
+            "type": "transcript_job_queue",
+            "updated_at": None,
+            "jobs": [],
+        }
+    if not isinstance(data, dict) or not isinstance(data.get("jobs"), list):
+        print(f"[queue] invalid queue shape ({path}), starting empty", file=sys.stderr)
+        return {
+            "schema_version": JOB_QUEUE_SCHEMA_VERSION,
+            "type": "transcript_job_queue",
+            "updated_at": None,
+            "jobs": [],
         }
     return data
 
@@ -168,6 +203,68 @@ def fetch_creator_videos(
         "count": len(annotated_entries),
         "new_count": new_count,
         "processed_count": processed_count,
+    }
+
+
+def enqueue_creator_videos(
+    library: Path,
+    *,
+    selector: str,
+    limit: int,
+    verbose: bool = False,
+) -> dict[str, Any]:
+    preview = fetch_creator_videos(library, selector=selector, limit=limit, verbose=verbose)
+    queue = load_job_queue(library)
+    now = _now()
+    jobs = queue.setdefault("jobs", [])
+    existing_urls = {str(job.get("source_url") or "").rstrip("/") for job in jobs}
+    added: list[dict[str, Any]] = []
+    skipped_existing = 0
+    skipped_processed = 0
+
+    creator = preview["creator"]
+    for entry in preview["entries"]:
+        if entry.get("library_status") == "processed":
+            skipped_processed += 1
+            continue
+        source_url = str(entry.get("url") or "").rstrip("/")
+        if not source_url or source_url in existing_urls:
+            skipped_existing += 1
+            continue
+        job_id = hashlib.sha256(source_url.encode("utf-8")).hexdigest()[:12]
+        job = {
+            "id": job_id,
+            "status": "pending",
+            "source_url": source_url,
+            "title": entry.get("title") or "untitled",
+            "video_id": entry.get("id"),
+            "platform": creator.get("platform"),
+            "creator_id": creator.get("id"),
+            "creator_name": creator.get("name"),
+            "added_at": now,
+            "last_error": None,
+        }
+        jobs.append(job)
+        existing_urls.add(source_url)
+        added.append(job)
+
+    queue["schema_version"] = JOB_QUEUE_SCHEMA_VERSION
+    queue["type"] = "transcript_job_queue"
+    queue["updated_at"] = now
+    path = job_queue_path(library)
+    write_json(path, queue)
+    print(
+        f"[queue] added: {len(added)}, skipped processed: {skipped_processed}, skipped existing: {skipped_existing}",
+        file=sys.stderr,
+    )
+    print(f"[queue] path: {path}", file=sys.stderr)
+    return {
+        "status": "ok",
+        "queue": str(path),
+        "added_count": len(added),
+        "skipped_processed": skipped_processed,
+        "skipped_existing": skipped_existing,
+        "jobs": added,
     }
 
 

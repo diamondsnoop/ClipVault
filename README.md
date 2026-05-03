@@ -132,6 +132,9 @@ If index files are deleted, stale, or inconsistent, rebuild them from existing c
 
 # Preview recent video entries for a recorded creator
 .\clipvault.ps1 creator fetch "Jabzy" --limit 10
+
+# Add new entries to the local transcript job queue
+.\clipvault.ps1 creator enqueue "Jabzy" --limit 10
 ```
 
 ## Auto Series Rules
@@ -181,6 +184,7 @@ ClipVault can record creator/channel source URLs for later batch ingestion:
 .\clipvault.ps1 creator add "https://www.youtube.com/@Jabzy" --name "Jabzy"
 .\clipvault.ps1 creator list
 .\clipvault.ps1 creator fetch "Jabzy" --limit 10
+.\clipvault.ps1 creator enqueue "Jabzy" --limit 10
 ```
 
 Creator records are stored locally in:
@@ -192,6 +196,14 @@ library/_creators.json
 `creator fetch` currently previews recent video entries only. Each entry is
 marked as `new` or `processed` based on local completed manifests. It does not
 process transcripts or enqueue ASR jobs yet.
+
+`creator enqueue` writes only `new` entries into:
+
+```text
+library/_queue.json
+```
+
+Queue entries are marked `pending`. ClipVault does not run queued jobs yet.
 
 ## Repository Hygiene
 

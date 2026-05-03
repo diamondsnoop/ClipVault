@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .asr import resolve_device, transcribe_audio
-from .creators import add_creator_source, fetch_creator_videos, list_creator_sources
+from .creators import add_creator_source, enqueue_creator_videos, fetch_creator_videos, list_creator_sources
 from .exporters import write_outputs
 from .library import (
     build_manifest,
@@ -128,6 +128,12 @@ def process_creator_command(argv: list[str] | None = None) -> dict[str, Any]:
     fetch_parser.add_argument("--limit", type=int, default=20, help="Maximum entries to fetch. Default: 20.")
     fetch_parser.add_argument("--verbose", "-v", action="store_true", help="Show yt-dlp logs.")
 
+    enqueue_parser = subparsers.add_parser("enqueue", help="Add new creator entries to the local transcript job queue.")
+    enqueue_parser.add_argument("selector", help="Creator id, name, or source URL.")
+    enqueue_parser.add_argument("--library", type=Path, default=DEFAULT_LIBRARY, help="Subtitle library root.")
+    enqueue_parser.add_argument("--limit", type=int, default=20, help="Maximum entries to inspect. Default: 20.")
+    enqueue_parser.add_argument("--verbose", "-v", action="store_true", help="Show yt-dlp logs.")
+
     args = parser.parse_args(argv)
     try:
         if args.command == "add":
@@ -137,6 +143,13 @@ def process_creator_command(argv: list[str] | None = None) -> dict[str, Any]:
             return {"status": "ok", "creators": list_creator_sources(args.library)}
         if args.command == "fetch":
             return fetch_creator_videos(
+                args.library,
+                selector=args.selector,
+                limit=args.limit,
+                verbose=args.verbose,
+            )
+        if args.command == "enqueue":
+            return enqueue_creator_videos(
                 args.library,
                 selector=args.selector,
                 limit=args.limit,

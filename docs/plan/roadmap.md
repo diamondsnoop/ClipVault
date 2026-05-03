@@ -257,6 +257,27 @@ clipvault creator fetch <creator-id-or-name> --limit 20
 - Updates `last_checked_at`.
 - Does not process transcripts or queue ASR jobs yet.
 
+### Phase 5 Step 3 — Fetch Status Marking (completed)
+
+Fetch preview entries are compared against completed local manifests:
+
+- `library_status: "processed"` when the video is already in the transcript library.
+- `library_status: "new"` when the video is a candidate for ingestion.
+- Results include `new_count` and `processed_count`.
+
+### Phase 5 Step 4 — Transcript Job Queue (completed)
+
+Queue new creator entries without processing them:
+
+```powershell
+clipvault creator enqueue <creator-id-or-name> --limit 20
+```
+
+- Writes pending jobs to `library/_queue.json`.
+- Skips entries already processed in the local library.
+- Skips entries already present in the queue.
+- Does not execute downloads, subtitle fetching, or ASR yet.
+
 Planned work:
 
 - ~~Add creator/channel source records.~~
@@ -266,7 +287,7 @@ Planned work:
   - ~~`clipvault creator fetch <creator>`.~~
 - ~~Fetch recent videos from a creator/channel.~~ (preview only)
 - ~~Skip already processed videos.~~ (status marking only)
-- Queue transcript jobs.
+- ~~Queue transcript jobs.~~
 - Report per-video status.
 
 Success criteria:

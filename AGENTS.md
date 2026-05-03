@@ -64,6 +64,8 @@ Creator source registry (Phase 5 Step 1):
 - `clipvault creator fetch <selector>` previews recent entries from a recorded source.
 - Fetch entries include `library_status` as `new` or `processed`.
 - Fetch preview does not process transcripts or queue ASR jobs yet.
+- `clipvault creator enqueue <selector>` writes `new` entries to `library/_queue.json`.
+- Queue entries are `pending`; queue execution is not implemented yet.
 
 Not yet implemented:
 
@@ -172,6 +174,7 @@ Record and list creator/channel sources:
 .\clipvault.ps1 creator add "https://www.youtube.com/@Jabzy" --name "Jabzy"
 .\clipvault.ps1 creator list
 .\clipvault.ps1 creator fetch "Jabzy" --limit 10
+.\clipvault.ps1 creator enqueue "Jabzy" --limit 10
 ```
 
 ## Manual Platform Samples
