@@ -16,14 +16,17 @@ All tests used `--force` to bypass cache and exercise the full pipeline.
 |---|---|---|---|---|
 | A — Platform captions | https://www.youtube.com/watch?v=Vdd6EOlRVbg | When did Islamic Extremism become a Threat? \| History of the Middle East 1600-1800 - 3/21 | 38:17 | Jabzy |
 | B — ASR fallback | https://www.youtube.com/watch?v=2ZrWHtvSog4 | 1-Minute Audio Test for Stereo Speakers & Headphones | 1:00 | Outlier Audio |
+| C — Manual subtitles | https://www.youtube.com/watch?v=jNQXAC9IVRw | Me at the zoo | 0:19 | jawed |
 
 ## Steps
 
 1. Checked subtitle availability via `yt-dlp --list-subs` for candidate videos.
 2. Ran `python -m clipvault <URL> --force --verbose` for Scenario A.
 3. Ran `python -m clipvault <URL> --force --model small --device cpu` for Scenario B (no captions → ASR).
-4. Inspected manifest.json, output files, and cache-hit behavior.
-5. Verified all existing unit tests still pass.
+4. Searched Jabzy videos for manual subtitles — none found. Selected "Me at the zoo" (jNQXAC9IVRw), the first YouTube video ever uploaded, which has manually uploaded English and German subtitles.
+5. Ran `python -m clipvault <URL> --force --verbose` for Scenario C.
+6. Inspected manifest.json, output files, and cache-hit behavior.
+7. Verified all existing unit tests still pass.
 
 ## Results
 
@@ -74,7 +77,29 @@ All tests used `--force` to bypass cache and exercise the full pipeline.
 - Manifest includes `subtitle_source: "asr:faster-whisper"`, `asr_model: "small"`, `asr_device: "cpu"`.
 - Second run without `--force` returned `status: "cached"`.
 
-### Cache hit verification
+### Scenario C — YouTube Manual Subtitles
+
+```
+[pipeline] processing https://www.youtube.com/watch?v=jNQXAC9IVRw
+[metadata] ok: "Me at the zoo" by jawed
+[platform] youtube
+[subtitle] language priority: en, zh-CN, zh-Hans, zh
+[subtitle] found 6 segments from subtitle:en:json3
+[pipeline] using subtitle:en:json3
+[export] srt: ...\transcript.srt
+[export] txt: ...\transcript.txt
+[export] md:  ...\transcript.md
+```
+
+**Correct behavior:**
+- Manual subtitle detected as `subtitle:en:json3` (NOT `automatic_caption:...`).
+- English selected per YouTube language priority (`en` at index 0).
+- json3 format chosen (highest ext priority within English).
+- Output path: `library/youtube/jawed/Me at the zoo - jNQXAC9IVRw/`.
+- Manifest includes `subtitle_source: "subtitle:en:json3"`, `asr_model: null`, `asr_device: null`.
+- All three output files generated.
+
+**Note:** No Jabzy video in the History of the Middle East series has manual subtitles. "Me at the zoo" was chosen as a minimal, stable, widely-known example with confirmed manually uploaded subtitles (en and de). The manual-subtitle pipeline code path is identical regardless of channel — the selection logic only depends on the `subtitles` dict in yt-dlp's output, which this video provides.
 
 ```
 $ python -m clipvault "https://www.youtube.com/watch?v=2ZrWHtvSog4"
@@ -85,9 +110,10 @@ $ python -m clipvault "https://www.youtube.com/watch?v=2ZrWHtvSog4"
 
 ## Problems Found
 
-**None.** Both subtitle and ASR paths completed without errors.
+**None.** All three paths (manual subtitle, automatic caption, ASR fallback) completed without errors.
 
-Minor observations (not blocking):
+Limitations noted:
+- **No Jabzy manual subtitles found.** Manual subtitle validation used a non-Jabzy video ("Me at the zoo") because no video in the History of the Middle East series has manually uploaded subtitles. The code path is channel-independent.
 - `en-orig` (YouTube's "English Original" auto-caption) is selected over plain `en` when both exist at the same priority, because both match `en` via `startswith`. This is acceptable — the content is the same English ASR track.
 - The `tiny` ASR model has a dangling symlink in the HF cache (target drive not mounted). The `small` model works. This is a local environment issue, not a code bug.
 
