@@ -111,3 +111,55 @@ yt-dlp path.
 - `clipvault/asr.py` — error messages, model cache log
 - `clipvault/library.py` — schema v1, platform detection, update_manifest
 
+---
+
+## 2026-05-04: Phase 2 — Library Structure and Metadata
+
+### Changes
+
+1. **Platform-aware library path**
+   - `video_directory()` now requires `platform` as first path segment:
+     `library/<platform>/<creator>/<title - id>/`
+   - Added `legacy_video_directory()` for old-style path generation (backward compat).
+   - Added `resolve_video_directory()` that checks new path first, falls back to legacy.
+
+2. **Manifest-based cache detection**
+   - Added `is_completed()` function: checks manifest exists and either
+     `subtitle_source` is populated, OR all output files (`srt`/`txt`/`md`) exist.
+   - Cache check at `--force` guard now uses `is_completed()` instead of
+     `transcript.md` existence-only check.
+
+3. **Backward compatibility**
+   - `resolve_video_directory()` tries new platform-aware path first.
+   - If no completed manifest there, checks legacy path without platform.
+   - Old v0 manifests (no `subtitle_source`) are still recognized as completed
+     if all three output files are present.
+
+4. **Updated CLI**
+   - `process_video()` now outputs `platform` in result dict.
+   - CLI description updated from "Bilibili subtitles" to generic "video subtitles".
+
+### Files Changed
+
+- `clipvault/library.py` — video_directory, legacy_video_directory, is_completed,
+  resolve_video_directory added.
+- `clipvault/cli.py` — platform-aware path, manifest-based cache, updated result.
+- `tests/test_library.py` — 14 new tests (is_completed, resolve, legacy compat).
+
+### Verification
+
+```powershell
+# New path test
+.\clipvault.ps1 "https://www.bilibili.com/video/BV1fX4y1Q7Ux" --force
+# → library/bilibili/吕立青_JimmyLv/... (platform prefix)
+
+# Cache test (without --force)
+.\clipvault.ps1 "https://www.bilibili.com/video/BV1fX4y1Q7Ux"
+# → status=cached (manifest-based detection)
+
+# Legacy backward compat
+# library/吕立青_JimmyLv/... (old path without platform) is still detected as completed
+```
+
+63 tests pass.
+

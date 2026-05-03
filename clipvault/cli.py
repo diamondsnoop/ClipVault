@@ -9,7 +9,16 @@ from typing import Any
 
 from .asr import resolve_device, transcribe_audio
 from .exporters import write_outputs
-from .library import build_manifest, first_text, update_manifest, video_directory, write_json
+from .library import (
+    build_manifest,
+    first_text,
+    guess_platform,
+    is_completed,
+    resolve_video_directory,
+    update_manifest,
+    video_directory,
+    write_json,
+)
 from .platforms import download_audio, extract_info
 from .subtitles import get_platform_subtitles
 
@@ -20,9 +29,9 @@ DEFAULT_LIBRARY = Path.cwd() / "library"
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="clipvault",
-        description="Fetch Bilibili subtitles, or run ASR when subtitles are unavailable.",
+        description="Fetch video subtitles, or run ASR when subtitles are unavailable.",
     )
-    parser.add_argument("url", help="Bilibili video URL, BV/AV URL, or b23.tv short link.")
+    parser.add_argument("url", help="Video URL (Bilibili, YouTube, etc.).")
     parser.add_argument("--library", type=Path, default=DEFAULT_LIBRARY, help="Subtitle library root.")
     parser.add_argument("--model", default="small", help="faster-whisper model size/name. Default: small.")
     parser.add_argument(
@@ -32,7 +41,7 @@ def main(argv: list[str] | None = None) -> None:
         help="ASR device. Default: auto, which prefers CUDA when available.",
     )
     parser.add_argument("--compute-type", default="auto", help="faster-whisper compute type. Default: auto.")
-    parser.add_argument("--force", action="store_true", help="Re-fetch even if transcript.md exists.")
+    parser.add_argument("--force", action="store_true", help="Re-fetch even if transcript exists.")
     parser.add_argument("--keep-audio", action="store_true", help="Keep downloaded audio after ASR.")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show yt-dlp logs.")
     args = parser.parse_args(argv)
@@ -74,20 +83,27 @@ def process_video(
     title = first_text(info, "title", default="untitled")
     uploader = first_text(info, "uploader", "channel", "creator", default="unknown-uploader")
     video_id = first_text(info, "id", "display_id", default="unknown-id")
+    platform = guess_platform(url)
 
-    video_dir = video_directory(library, uploader=uploader, title=title, video_id=video_id)
-    video_dir.mkdir(parents=True, exist_ok=True)
-
-    md_path = video_dir / "transcript.md"
-    if md_path.exists() and not force:
+    # Check cache (handles both new platform-aware and legacy paths)
+    video_dir = resolve_video_directory(
+        library, platform=platform, uploader=uploader, title=title, video_id=video_id,
+    )
+    if is_completed(video_dir) and not force:
+        md_path = video_dir / "transcript.md"
         return {
             "status": "cached",
             "title": title,
             "uploader": uploader,
             "video_id": video_id,
-            "markdown": str(md_path),
+            "platform": platform,
+            "markdown": str(md_path) if md_path.exists() else None,
             "folder": str(video_dir),
         }
+
+    # New processing always uses platform-aware path
+    video_dir = video_directory(library, platform=platform, uploader=uploader, title=title, video_id=video_id)
+    video_dir.mkdir(parents=True, exist_ok=True)
 
     manifest = build_manifest(info, url=url, title=title, uploader=uploader, video_id=video_id)
     write_json(video_dir / "manifest.json", manifest)
@@ -135,8 +151,9 @@ def process_video(
         "title": title,
         "uploader": uploader,
         "video_id": video_id,
+        "platform": platform,
         "segments": len(segments),
-        "markdown": str(md_path),
+        "markdown": str(video_dir / "transcript.md"),
         "folder": str(video_dir),
     }
 

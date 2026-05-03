@@ -7,8 +7,12 @@ from clipvault.library import (
     build_manifest,
     first_text,
     guess_platform,
+    is_completed,
+    legacy_video_directory,
+    resolve_video_directory,
     safe_name,
     update_manifest,
+    video_directory,
     write_json,
 )
 
@@ -130,3 +134,114 @@ def test_build_manifest_nullable_fields():
     assert manifest["asr_model"] is None
     assert manifest["asr_device"] is None
     assert manifest["output_files"] == []
+
+
+# --- video_directory ---
+
+
+def test_video_directory_with_platform():
+    path = video_directory(Path("/lib"), platform="bilibili", uploader="Creator", title="My Video", video_id="BV123")
+    assert path == Path("/lib/bilibili/Creator/My Video - BV123")
+
+
+def test_video_directory_sanitizes_names():
+    path = video_directory(Path("/lib"), platform="youtube", uploader="Bad:Name", title="File/Path", video_id="x")
+    assert "Bad_Name" in str(path)
+    assert "File_Path" in str(path)
+
+
+# --- legacy_video_directory ---
+
+
+def test_legacy_video_directory():
+    path = legacy_video_directory(Path("/lib"), uploader="Creator", title="Video", video_id="V1")
+    assert path == Path("/lib/Creator/Video - V1")
+
+
+# --- is_completed ---
+
+
+def test_is_completed_true_when_subtitle_source_set(tmp_path: Path):
+    manifest = tmp_path / "manifest.json"
+    write_json(manifest, {"subtitle_source": "subtitle:en:json3"})
+    assert is_completed(tmp_path)
+
+
+def test_is_completed_false_when_no_manifest(tmp_path: Path):
+    assert not is_completed(tmp_path)
+
+
+def test_is_completed_false_when_subtitle_source_null(tmp_path: Path):
+    manifest = tmp_path / "manifest.json"
+    write_json(manifest, {"subtitle_source": None})
+    assert not is_completed(tmp_path)
+
+
+def test_is_completed_false_when_subtitle_source_missing(tmp_path: Path):
+    manifest = tmp_path / "manifest.json"
+    write_json(manifest, {"title": "no source"})
+    assert not is_completed(tmp_path)
+
+
+def test_is_completed_false_on_corrupted_manifest(tmp_path: Path):
+    (tmp_path / "manifest.json").write_text("not-json", encoding="utf-8")
+    assert not is_completed(tmp_path)
+
+
+def test_is_completed_legacy_manifest_with_output_files(tmp_path: Path):
+    """A v0 manifest without subtitle_source is still completed if output files exist."""
+    write_json(tmp_path / "manifest.json", {"url": "https://example.com", "title": "old"})
+    (tmp_path / "transcript.srt").write_text("")
+    (tmp_path / "transcript.txt").write_text("")
+    (tmp_path / "transcript.md").write_text("")
+    assert is_completed(tmp_path)
+
+
+def test_is_completed_legacy_manifest_missing_output(tmp_path: Path):
+    """A v0 manifest without output files should not be considered completed."""
+    write_json(tmp_path / "manifest.json", {"url": "https://example.com", "title": "old"})
+    assert not is_completed(tmp_path)
+
+
+# --- resolve_video_directory ---
+
+
+def test_resolve_prefers_new_path(tmp_path: Path):
+    """When only the new platform-aware path has a completed manifest, prefer it."""
+    new_dir = video_directory(tmp_path, platform="bilibili", uploader="U", title="T", video_id="V1")
+    new_dir.mkdir(parents=True)
+    write_json(new_dir / "manifest.json", {"subtitle_source": "subtitle:en:json3"})
+
+    result = resolve_video_directory(tmp_path, platform="bilibili", uploader="U", title="T", video_id="V1")
+    assert result == new_dir
+
+
+def test_resolve_falls_back_to_legacy(tmp_path: Path):
+    """When only the legacy path has a completed manifest, return it."""
+    legacy_dir = legacy_video_directory(tmp_path, uploader="U", title="T", video_id="V1")
+    legacy_dir.mkdir(parents=True)
+    write_json(legacy_dir / "manifest.json", {"subtitle_source": "asr:faster-whisper"})
+
+    result = resolve_video_directory(tmp_path, platform="youtube", uploader="U", title="T", video_id="V1")
+    assert result == legacy_dir
+
+
+def test_resolve_prefers_new_over_legacy_when_both_completed(tmp_path: Path):
+    """When both paths have a completed manifest, prefer the new one."""
+    new_dir = video_directory(tmp_path, platform="bilibili", uploader="U", title="T", video_id="V1")
+    new_dir.mkdir(parents=True)
+    write_json(new_dir / "manifest.json", {"subtitle_source": "subtitle:en:json3"})
+
+    legacy_dir = legacy_video_directory(tmp_path, uploader="U", title="T", video_id="V1")
+    legacy_dir.mkdir(parents=True)
+    write_json(legacy_dir / "manifest.json", {"subtitle_source": "asr:faster-whisper"})
+
+    result = resolve_video_directory(tmp_path, platform="bilibili", uploader="U", title="T", video_id="V1")
+    assert result == new_dir
+
+
+def test_resolve_returns_new_path_when_no_cache(tmp_path: Path):
+    """When nothing is cached, return the new platform-aware path."""
+    result = resolve_video_directory(tmp_path, platform="bilibili", uploader="U", title="T", video_id="V1")
+    expected = video_directory(tmp_path, platform="bilibili", uploader="U", title="T", video_id="V1")
+    assert result == expected

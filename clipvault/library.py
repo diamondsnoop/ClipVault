@@ -10,8 +10,50 @@ from typing import Any
 SCHEMA_VERSION = 1
 
 
-def video_directory(library: Path, *, uploader: str, title: str, video_id: str) -> Path:
+def video_directory(library: Path, *, platform: str, uploader: str, title: str, video_id: str) -> Path:
+    return library / safe_name(platform) / safe_name(uploader) / safe_name(f"{title} - {video_id}")
+
+
+def legacy_video_directory(library: Path, *, uploader: str, title: str, video_id: str) -> Path:
+    """Old-style path without platform segment (backward compatibility)."""
     return library / safe_name(uploader) / safe_name(f"{title} - {video_id}")
+
+
+def is_completed(video_dir: Path) -> bool:
+    """Check whether a video directory has a completed manifest."""
+    manifest_path = video_dir / "manifest.json"
+    if not manifest_path.exists():
+        return False
+    if not manifest_path.exists():
+        return False
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if data.get("subtitle_source"):
+            return True
+    except Exception:
+        return False
+    # Legacy check: manifest exists (even v0) and all output files are present
+    expected = ["transcript.srt", "transcript.txt", "transcript.md"]
+    return all((video_dir / f).exists() for f in expected)
+
+
+def resolve_video_directory(
+    library: Path,
+    *,
+    platform: str,
+    uploader: str,
+    title: str,
+    video_id: str,
+) -> Path:
+    """Resolve the video directory: prefer new platform-aware path,
+    fall back to legacy path for backward compatibility."""
+    new_dir = video_directory(library, platform=platform, uploader=uploader, title=title, video_id=video_id)
+    if is_completed(new_dir):
+        return new_dir
+    legacy_dir = legacy_video_directory(library, uploader=uploader, title=title, video_id=video_id)
+    if is_completed(legacy_dir):
+        return legacy_dir
+    return new_dir
 
 
 def build_manifest(
