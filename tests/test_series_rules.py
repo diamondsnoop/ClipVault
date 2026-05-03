@@ -226,3 +226,85 @@ def test_resolve_blank_explicit_is_auto(tmp_path: Path):
     )
     assert series == "Auto"
     assert source == "rule"
+
+
+# ── Malformed rule hardening (review fix) ──────────────────────────────
+
+
+def test_match_skips_non_dict_rule(tmp_path: Path):
+    """A bare integer in rules is skipped; the next valid rule still matches."""
+    rules: list = [
+        123,
+        {"series": "Valid", "title_contains": ["hello"], "title_regex": None},
+    ]
+    assert match_series_from_title("hello world", rules) == "Valid"
+
+
+def test_match_skips_non_dict_rule_log(capsys):
+    """Skipping a non-dict rule prints a diagnostic."""
+    rules: list = [
+        "not-a-rule",
+        {"series": "Valid", "title_contains": ["hello"], "title_regex": None},
+    ]
+    match_series_from_title("hello world", rules)
+    stderr = capsys.readouterr().err
+    assert "invalid rule skipped" in stderr
+
+
+def test_match_various_non_dict_items_never_crash():
+    """Non-dict items of various types are skipped without exception."""
+    rules: list = [
+        None,
+        "string",
+        42,
+        3.14,
+        [1, 2, 3],
+        True,
+        {"series": "S", "title_contains": ["ok"], "title_regex": None},
+    ]
+    assert match_series_from_title("ok", rules) == "S"
+    assert match_series_from_title("nope", rules) is None
+
+
+def test_load_rules_not_a_dict_logs(tmp_path: Path, capsys):
+    """Top-level array logs a specific diagnostic."""
+    rules_file = tmp_path / "_series_rules.json"
+    rules_file.write_text("[]", encoding="utf-8")
+    assert load_series_rules(rules_file) is None
+    stderr = capsys.readouterr().err
+    assert "expected object" in stderr
+
+
+def test_load_rules_not_a_list_logs(tmp_path: Path, capsys):
+    """rules field that is not a list logs a specific diagnostic."""
+    rules_file = tmp_path / "_series_rules.json"
+    rules_file.write_text(
+        json.dumps({"schema_version": 1, "rules": "oops"}),
+        encoding="utf-8",
+    )
+    assert load_series_rules(rules_file) is None
+    stderr = capsys.readouterr().err
+    assert "rules must be a list" in stderr
+
+
+def test_resolve_series_with_malformed_rule(tmp_path: Path, capsys):
+    """A malformed rule item in the file does not crash resolve_series;
+    the next valid rule is matched."""
+    (tmp_path / "youtube" / "U").mkdir(parents=True)
+    rules_file = tmp_path / "youtube" / "U" / "_series_rules.json"
+    rules_file.write_text(
+        json.dumps({
+            "rules": [
+                123,
+                {"series": "Good", "title_contains": ["video"], "title_regex": None},
+            ],
+        }),
+        encoding="utf-8",
+    )
+    series, source = resolve_series(
+        tmp_path, platform="youtube", uploader="U", title="my video", explicit_series=None,
+    )
+    assert series == "Good"
+    assert source == "rule"
+    stderr = capsys.readouterr().err
+    assert "invalid rule skipped" in stderr

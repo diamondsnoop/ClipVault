@@ -30,9 +30,11 @@ def load_series_rules(path: Path) -> list[dict[str, Any]] | None:
         return None
 
     if not isinstance(data, dict):
+        print(f"[series] invalid rules file ({path}): expected object", file=sys.stderr)
         return None
     rules = data.get("rules", [])
     if not isinstance(rules, list):
+        print(f"[series] invalid rules file ({path}): rules must be a list", file=sys.stderr)
         return None
     return rules
 
@@ -43,6 +45,9 @@ def match_series_from_title(title: str, rules: list[dict[str, Any]]) -> str | No
     Returns the first matching series name, or ``None``.
     """
     for rule in rules:
+        if not isinstance(rule, dict):
+            print("[series] invalid rule skipped: expected object", file=sys.stderr)
+            continue
         series = normalize_series(rule.get("series"))
         if not series:
             continue
