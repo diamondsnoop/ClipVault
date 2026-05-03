@@ -1,0 +1,207 @@
+# ClipVault Agent Guide
+
+## Project Goal
+
+ClipVault is a local-first video transcript vault. The current priority is reliable acquisition and maintenance of original video transcripts, not AI note generation.
+
+Core workflow:
+
+1. Accept a video URL.
+2. Prefer platform-provided subtitles or automatic captions.
+3. If no subtitles are available, download audio and run local ASR.
+4. Export `srt`, `txt`, and `md`.
+5. Store outputs under a stable local library path.
+
+## Current Scope
+
+Implemented:
+
+- Bilibili URL processing through `yt-dlp`.
+- Platform subtitle extraction when available.
+- Audio download fallback.
+- Local ASR through `faster-whisper`.
+- CUDA auto-selection with CPU fallback.
+- Local file outputs:
+  - `manifest.json`
+  - `transcript.srt`
+  - `transcript.txt`
+  - `transcript.md`
+- Basic creator/video folder layout:
+  - `library/<creator>/<video title - id>/`
+
+Not yet implemented:
+
+- GUI.
+- YouTube/Douyin-specific polish.
+- Series management.
+- Creator subscriptions.
+- Database/indexing.
+- AI summary or note generation.
+
+## Repository Layout
+
+- `clipvault/cli.py`: CLI entrypoint and high-level pipeline orchestration.
+- `clipvault/platforms.py`: URL metadata extraction and audio download via `yt-dlp`.
+- `clipvault/subtitles.py`: Subtitle track selection, download, and parsing.
+- `clipvault/asr.py`: `faster-whisper`, CUDA/CPU selection, local model resolution.
+- `clipvault/library.py`: File naming, manifest creation, library path helpers.
+- `clipvault/exporters.py`: `srt`, `txt`, and `md` output generation.
+- `clipvault/models.py`: Shared dataclasses.
+- `clipvault/text.py`: Text cleanup helpers.
+- `clipvault.ps1`: Windows convenience launcher.
+- `requirements.lock`: Base pinned runtime dependencies.
+- `requirements-gpu-win.lock`: Optional Windows NVIDIA GPU runtime dependencies.
+- `uv.lock`: uv-generated lock data.
+
+## Local Runtime
+
+This project uses a local `.venv`, but `.venv/` is ignored and must not be committed.
+
+Install base dependencies:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.lock
+.\.venv\Scripts\python.exe -m pip install -e . --no-deps
+```
+
+Install optional Windows NVIDIA GPU runtime:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-gpu-win.lock
+```
+
+`ffmpeg` must be available on `PATH`.
+
+## Common Commands
+
+Run help:
+
+```powershell
+.\clipvault.ps1 --help
+```
+
+Process a video:
+
+```powershell
+.\clipvault.ps1 "https://www.bilibili.com/video/BV..."
+```
+
+Force reprocessing:
+
+```powershell
+.\clipvault.ps1 "https://www.bilibili.com/video/BV..." --force
+```
+
+Force CPU:
+
+```powershell
+.\clipvault.ps1 "https://www.bilibili.com/video/BV..." --device cpu
+```
+
+Verify Python dependencies:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip check
+```
+
+Compile modules:
+
+```powershell
+.\.venv\Scripts\python.exe -m compileall clipvault
+```
+
+## Development Rules
+
+- Keep the project focused on transcript acquisition and transcript library maintenance.
+- Do not add AI note generation until transcript acquisition and library management are stable.
+- Do not commit generated transcripts, audio files, model caches, `.venv/`, or package caches.
+- Keep GPU runtime optional; do not force all users to install large NVIDIA packages.
+- Preserve existing CLI behavior unless explicitly changing it.
+- Prefer small, testable modules over adding more logic to `cli.py`.
+- Use UTF-8 for documentation and generated text.
+- Every development task must be planned around a clear target and executed step by step. After completing each meaningful step, write a corresponding development log entry under `logs/development/`.
+- Code changes must include user-visible program logging where appropriate. Features should report what they are doing, what succeeded, what failed, and enough diagnostic context to make bug reports actionable. Program log conventions and examples belong under `logs/program/`.
+
+## Logs
+
+ClipVault treats logs as part of long-term project maintenance, not disposable notes.
+
+### Development Logs
+
+Development logs live in:
+
+```text
+logs/development/
+```
+
+Use development logs to record how the project changes over time. Each development task should create or update a dated Markdown file. Recommended naming:
+
+```text
+logs/development/YYYY-MM-DD-short-topic.md
+```
+
+Each entry should include:
+
+- Target: the concrete goal of the task.
+- Steps: the planned steps and what was completed.
+- Changes: important modules/files changed.
+- Verification: commands, scenarios, and results.
+- Follow-ups: unresolved issues or recommended next tasks.
+
+### Program Logs
+
+Program logging guidance lives in:
+
+```text
+logs/program/
+```
+
+Program logs are about runtime observability. When adding or changing code, make sure the user can understand:
+
+- Which stage is running, such as metadata extraction, subtitle lookup, audio download, ASR, export, or cache reuse.
+- What succeeded, including subtitle source, ASR device/model, output paths, and elapsed time when useful.
+- What failed, including the operation, error reason, and practical next checks.
+- Whether the tool is falling back, such as CUDA to CPU or platform subtitles to ASR.
+
+The current CLI may use simple stderr/stdout messages. As ClipVault grows, prefer a structured logging layer that can later support GUI progress display, log files, and bug reports.
+
+## Open Source Maintenance Standard
+
+Develop ClipVault as a long-lived, professional, friendly open source project:
+
+- Avoid one-off local hacks that only work on a single machine.
+- Keep configuration, dependency assumptions, and platform-specific behavior documented.
+- Prefer maintainable interfaces over quick coupling.
+- Make failures understandable to non-author users.
+- Keep public behavior stable unless a change is intentional and documented.
+- Leave enough tests, logs, and documentation for future contributors to continue the work safely.
+
+## Git Hygiene
+
+Ignored local/runtime directories include:
+
+- `.venv/`
+- `.pip-cache/`
+- `.uv-cache/`
+- `.tmp/`
+- `library/`
+- `vendor/wheels/`
+
+Before committing:
+
+```powershell
+Remove-Item -LiteralPath clipvault\__pycache__ -Recurse -Force -ErrorAction SilentlyContinue
+.\clipvault.ps1 --help
+.\.venv\Scripts\python.exe -m pip check
+git status --short --ignored
+```
+
+## Near-Term Roadmap
+
+Recommended next steps:
+
+1. Add tests for subtitle parsing and exporters.
+2. Improve `manifest.json` schema for future series/library management.
+3. Add YouTube support validation using the existing `yt-dlp` path.
+4. Add a clean library layout for platform/creator/series/video.
+5. Add series assignment later, starting with manual `--series`.

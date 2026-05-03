@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import urllib.request
 from typing import Any
 
@@ -38,9 +39,12 @@ def get_platform_subtitles(info: dict[str, Any]) -> tuple[list[SubtitleSegment],
             raw = fetch_text(entry["url"])
             segments = parse_subtitle(raw, entry.get("ext") or "")
             if segments:
-                return segments, f"{source_name}:{lang}:{entry.get('ext') or 'unknown'}"
+                source_desc = f"{source_name}:{lang}:{entry.get('ext') or 'unknown'}"
+                print(f"[subtitle] found {len(segments)} segments from {source_desc}", file=sys.stderr)
+                return segments, source_desc
         except Exception:
             continue
+    print("[subtitle] no platform subtitles available", file=sys.stderr)
     return [], "none"
 
 

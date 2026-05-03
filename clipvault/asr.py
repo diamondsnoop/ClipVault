@@ -78,6 +78,12 @@ def transcribe_audio_once(
                 compute_type="int8",
                 allow_cpu_fallback=False,
             )
+        if "model" in str(exc).lower() and "not" in str(exc).lower():
+            raise RuntimeError(
+                f"ASR model '{resolved_model}' is not available locally. "
+                f"Download it first with: "
+                f"faster-whisper-whisper {resolved_model}  # or set --model to a different size"
+            ) from exc
         raise
     segments_iter, _info = model.transcribe(
         str(audio_path),
@@ -103,7 +109,10 @@ def transcribe_audio_once(
             )
         raise
     if not segments:
-        raise RuntimeError("ASR completed but returned no text.")
+        raise RuntimeError(
+            "ASR completed but returned no text. "
+            "The audio file may be silent, corrupted, or in an unsupported format."
+        )
     return segments
 
 
@@ -136,5 +145,6 @@ def resolve_local_model(model_name: str) -> str:
         snapshots = sorted((path for path in cache_root.iterdir() if path.is_dir()), key=lambda path: path.stat().st_mtime, reverse=True)
         if snapshots:
             return str(snapshots[0])
+    print(f"[asr] model '{model_name}' not found in local cache, will download from HuggingFace", file=sys.stderr)
     return f"Systran/faster-whisper-{model_name}"
 

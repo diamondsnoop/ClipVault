@@ -7,9 +7,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .asr import transcribe_audio
+from .asr import resolve_device, transcribe_audio
 from .exporters import write_outputs
-from .library import build_manifest, first_text, video_directory, write_json
+from .library import build_manifest, first_text, update_manifest, video_directory, write_json
 from .platforms import download_audio, extract_info
 from .subtitles import get_platform_subtitles
 
@@ -69,6 +69,7 @@ def process_video(
     if not shutil.which("ffmpeg"):
         raise RuntimeError("ffmpeg is not available in PATH.")
 
+    print(f"[pipeline] processing {url}", file=sys.stderr)
     info = extract_info(url, verbose=verbose)
     title = first_text(info, "title", default="untitled")
     uploader = first_text(info, "uploader", "channel", "creator", default="unknown-uploader")
@@ -93,6 +94,7 @@ def process_video(
 
     segments, source = get_platform_subtitles(info)
     if not segments:
+        print("[pipeline] no subtitles found, falling back to ASR", file=sys.stderr)
         audio_path = download_audio(url, video_dir, verbose=verbose)
         segments = transcribe_audio(audio_path, model_name=model_name, device=device, compute_type=compute_type)
         source = "asr:faster-whisper"
@@ -101,6 +103,8 @@ def process_video(
                 audio_path.unlink()
             except OSError:
                 pass
+    else:
+        print(f"[pipeline] using {source}", file=sys.stderr)
 
     write_outputs(
         video_dir=video_dir,
@@ -111,6 +115,19 @@ def process_video(
         source=source,
         segments=segments,
     )
+
+    print(f"[export] srt: {video_dir / 'transcript.srt'}", file=sys.stderr)
+    print(f"[export] txt: {video_dir / 'transcript.txt'}", file=sys.stderr)
+    print(f"[export] md:  {video_dir / 'transcript.md'}", file=sys.stderr)
+
+    manifest_updates: dict[str, Any] = {
+        "subtitle_source": source,
+        "output_files": ["transcript.srt", "transcript.txt", "transcript.md"],
+    }
+    if source.startswith("asr:"):
+        manifest_updates["asr_model"] = model_name
+        manifest_updates["asr_device"] = resolve_device(device)
+    update_manifest(video_dir / "manifest.json", **manifest_updates)
 
     return {
         "status": "ok",
