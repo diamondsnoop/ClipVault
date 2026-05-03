@@ -25,6 +25,13 @@ def test_guess_platform_bilibili():
     assert guess_platform("https://b23.tv/abc123") == "bilibili"
 
 
+def test_guess_platform_rejects_fake_domains():
+    """Verifies guess_platform (which delegates to identify_platform)
+    does not match substring-hosting domains."""
+    assert guess_platform("https://notyoutube.com/watch?v=x") == "unknown"
+    assert guess_platform("https://evilbilibili.com/video/BV1") == "unknown"
+
+
 def test_guess_platform_youtube():
     assert guess_platform("https://www.youtube.com/watch?v=abc") == "youtube"
     assert guess_platform("https://youtu.be/abc123") == "youtube"

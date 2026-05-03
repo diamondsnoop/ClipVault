@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .platforms import identify_platform
+
 
 SCHEMA_VERSION = 1
 
@@ -92,14 +94,13 @@ def update_manifest(path: Path, **updates: Any) -> None:
 
 
 def guess_platform(url: str) -> str:
-    lower = url.lower()
-    if "bilibili.com" in lower or "b23.tv" in lower:
-        return "bilibili"
-    if "youtube.com" in lower or "youtu.be" in lower:
-        return "youtube"
-    if "douyin.com" in lower:
-        return "douyin"
-    return "unknown"
+    """Identify the video platform from *url*.
+
+    Delegates to :func:`platforms.identify_platform`.  Kept in ``library``
+    so that :func:`build_manifest` and external callers have a single
+    import path.
+    """
+    return identify_platform(url)
 
 
 def write_json(path: Path, data: dict[str, Any]) -> None:

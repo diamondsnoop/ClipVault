@@ -84,6 +84,7 @@ def process_video(
     uploader = first_text(info, "uploader", "channel", "creator", default="unknown-uploader")
     video_id = first_text(info, "id", "display_id", default="unknown-id")
     platform = guess_platform(url)
+    print(f"[platform] {platform}", file=sys.stderr)
 
     # Check cache (handles both new platform-aware and legacy paths)
     video_dir = resolve_video_directory(
