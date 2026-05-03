@@ -9,7 +9,7 @@ Avoid putting more platform logic into `cli.py`.
 ## Steps
 
 1. **Platform registry in `platforms.py`**
-   - Added `PLATFORMS` dict with `url_patterns` and `languages` per platform.
+   - Added `PLATFORMS` dict with `domains` and `languages` per platform.
    - Added `identify_platform(url)` — the single entry point for URL-based
      platform detection.
    - Added `platform_languages(platform)` — per-platform language preferences
@@ -74,7 +74,7 @@ for substring matching, which falsely identified fake domains like
 **Verification:**
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q        # 79 passed
+.\.venv\Scripts\python.exe -m pytest -q        # 78 passed
 .\clipvault.ps1 --help                          # CLI unchanged
 .\.venv\Scripts\python.exe -m pip check         # no broken deps
 .\.venv\Scripts\python.exe -m compileall -q clipvault tests  # clean
