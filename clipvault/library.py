@@ -24,16 +24,17 @@ def is_completed(video_dir: Path) -> bool:
     manifest_path = video_dir / "manifest.json"
     if not manifest_path.exists():
         return False
-    if not manifest_path.exists():
-        return False
     try:
         data = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if data.get("subtitle_source"):
-            return True
     except Exception:
         return False
-    # Legacy check: manifest exists (even v0) and all output files are present
-    expected = ["transcript.srt", "transcript.txt", "transcript.md"]
+
+    output_files = data.get("output_files")
+    if data.get("subtitle_source") and isinstance(output_files, list) and output_files:
+        return all((video_dir / str(file_name)).is_file() for file_name in output_files)
+
+    # Legacy check: v0 manifests had no subtitle_source/output_files fields.
+    expected = ("transcript.srt", "transcript.txt", "transcript.md")
     return all((video_dir / f).exists() for f in expected)
 
 
@@ -119,4 +120,3 @@ def safe_name(value: str, *, max_length: int = 120) -> str:
     if not cleaned:
         cleaned = "untitled"
     return cleaned[:max_length].rstrip(" .")
-

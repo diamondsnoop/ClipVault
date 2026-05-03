@@ -161,10 +161,33 @@ def test_legacy_video_directory():
 # --- is_completed ---
 
 
-def test_is_completed_true_when_subtitle_source_set(tmp_path: Path):
+def test_is_completed_true_when_manifest_outputs_exist(tmp_path: Path):
     manifest = tmp_path / "manifest.json"
-    write_json(manifest, {"subtitle_source": "subtitle:en:json3"})
+    write_json(
+        manifest,
+        {
+            "subtitle_source": "subtitle:en:json3",
+            "output_files": ["transcript.srt", "transcript.txt", "transcript.md"],
+        },
+    )
+    (tmp_path / "transcript.srt").write_text("", encoding="utf-8")
+    (tmp_path / "transcript.txt").write_text("", encoding="utf-8")
+    (tmp_path / "transcript.md").write_text("", encoding="utf-8")
     assert is_completed(tmp_path)
+
+
+def test_is_completed_false_when_manifest_output_missing(tmp_path: Path):
+    manifest = tmp_path / "manifest.json"
+    write_json(
+        manifest,
+        {
+            "subtitle_source": "subtitle:en:json3",
+            "output_files": ["transcript.srt", "transcript.txt", "transcript.md"],
+        },
+    )
+    (tmp_path / "transcript.srt").write_text("", encoding="utf-8")
+    (tmp_path / "transcript.txt").write_text("", encoding="utf-8")
+    assert not is_completed(tmp_path)
 
 
 def test_is_completed_false_when_no_manifest(tmp_path: Path):
@@ -211,6 +234,9 @@ def test_resolve_prefers_new_path(tmp_path: Path):
     new_dir = video_directory(tmp_path, platform="bilibili", uploader="U", title="T", video_id="V1")
     new_dir.mkdir(parents=True)
     write_json(new_dir / "manifest.json", {"subtitle_source": "subtitle:en:json3"})
+    (new_dir / "transcript.srt").write_text("", encoding="utf-8")
+    (new_dir / "transcript.txt").write_text("", encoding="utf-8")
+    (new_dir / "transcript.md").write_text("", encoding="utf-8")
 
     result = resolve_video_directory(tmp_path, platform="bilibili", uploader="U", title="T", video_id="V1")
     assert result == new_dir
@@ -221,6 +247,9 @@ def test_resolve_falls_back_to_legacy(tmp_path: Path):
     legacy_dir = legacy_video_directory(tmp_path, uploader="U", title="T", video_id="V1")
     legacy_dir.mkdir(parents=True)
     write_json(legacy_dir / "manifest.json", {"subtitle_source": "asr:faster-whisper"})
+    (legacy_dir / "transcript.srt").write_text("", encoding="utf-8")
+    (legacy_dir / "transcript.txt").write_text("", encoding="utf-8")
+    (legacy_dir / "transcript.md").write_text("", encoding="utf-8")
 
     result = resolve_video_directory(tmp_path, platform="youtube", uploader="U", title="T", video_id="V1")
     assert result == legacy_dir
@@ -231,10 +260,16 @@ def test_resolve_prefers_new_over_legacy_when_both_completed(tmp_path: Path):
     new_dir = video_directory(tmp_path, platform="bilibili", uploader="U", title="T", video_id="V1")
     new_dir.mkdir(parents=True)
     write_json(new_dir / "manifest.json", {"subtitle_source": "subtitle:en:json3"})
+    (new_dir / "transcript.srt").write_text("", encoding="utf-8")
+    (new_dir / "transcript.txt").write_text("", encoding="utf-8")
+    (new_dir / "transcript.md").write_text("", encoding="utf-8")
 
     legacy_dir = legacy_video_directory(tmp_path, uploader="U", title="T", video_id="V1")
     legacy_dir.mkdir(parents=True)
     write_json(legacy_dir / "manifest.json", {"subtitle_source": "asr:faster-whisper"})
+    (legacy_dir / "transcript.srt").write_text("", encoding="utf-8")
+    (legacy_dir / "transcript.txt").write_text("", encoding="utf-8")
+    (legacy_dir / "transcript.md").write_text("", encoding="utf-8")
 
     result = resolve_video_directory(tmp_path, platform="bilibili", uploader="U", title="T", video_id="V1")
     assert result == new_dir

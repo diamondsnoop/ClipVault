@@ -1,23 +1,24 @@
 # ClipVault
 
-ClipVault is a local-first video transcript vault. It accepts a video URL, tries to fetch existing platform subtitles first, falls back to local ASR when subtitles are unavailable, and stores `srt`, `txt`, and `md` outputs in a stable folder structure.
+ClipVault is a local-first video transcript vault. It accepts a video URL, tries to fetch existing platform subtitles first, falls back to local ASR when subtitles are unavailable, and stores `srt`, `txt`, and `md` outputs in a stable platform-aware folder structure.
 
-The current prototype focuses on Bilibili links. Broader platform support and richer library management will come later.
+The current project focuses on reliable transcript acquisition and local library maintenance. Bilibili is the primary path; YouTube has been validated through the same `yt-dlp` subtitle pipeline. Broader platform support and richer library management will come later.
 
 ## Current Behavior
 
-- Input a Bilibili video URL.
+- Input a video URL.
 - Prefer platform subtitles or automatic captions when available.
 - Fall back to `faster-whisper` ASR when no subtitle is available.
 - Use CUDA automatically when available, with CPU fallback.
-- Store outputs under `library/<creator>/<video title - id>/`.
+- Store outputs under `library/<platform>/<creator>/<video title - id>/`.
+- Reuse completed cached items based on `manifest.json` and actual output files.
 
 ## Quick Start
 
 Create a local virtual environment and install the project:
 
 ```powershell
-cd "C:\Users\24967\Documents\New project"
+cd "E:\myproject\ClipVault"
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -U pip
 .\.venv\Scripts\python.exe -m pip install -e .
@@ -69,19 +70,22 @@ You can force CPU or CUDA:
 
 ```text
 library/
-  Creator Name/
-    Video Title - BVxxxx/
-      manifest.json
-      transcript.srt
-      transcript.txt
-      transcript.md
-      source_audio.m4a        # kept only when --keep-audio is used
+  bilibili/
+    Creator Name/
+      Video Title - BVxxxx/
+        manifest.json
+        transcript.srt
+        transcript.txt
+        transcript.md
+        source_audio.m4a        # kept only when --keep-audio is used
 ```
+
+Old `library/<creator>/<video title - id>/` folders remain readable for cache compatibility when their manifest and output files are complete.
 
 ## Common Commands
 
 ```powershell
-# Re-fetch even if transcript.md already exists
+# Re-fetch even if a completed manifest and transcript files already exist
 .\clipvault.ps1 "https://www.bilibili.com/video/BV..." --force
 
 # Use a custom library root
@@ -98,5 +102,5 @@ Do not commit generated data or local runtime folders:
 - `.venv/`
 - `library/`
 - model caches
-- logs
+- runtime logs
 - generated subtitle files

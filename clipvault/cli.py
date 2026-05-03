@@ -91,6 +91,7 @@ def process_video(
     )
     if is_completed(video_dir) and not force:
         md_path = video_dir / "transcript.md"
+        print(f"[cache] hit: {video_dir}", file=sys.stderr)
         return {
             "status": "cached",
             "title": title,
@@ -156,4 +157,3 @@ def process_video(
         "markdown": str(video_dir / "transcript.md"),
         "folder": str(video_dir),
     }
-

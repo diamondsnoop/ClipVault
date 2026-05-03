@@ -17,6 +17,7 @@ Core workflow:
 Implemented:
 
 - Bilibili URL processing through `yt-dlp`.
+- YouTube subtitle pipeline validation through `yt-dlp`.
 - Platform subtitle extraction when available.
 - Audio download fallback.
 - Local ASR through `faster-whisper`.
@@ -26,13 +27,15 @@ Implemented:
   - `transcript.srt`
   - `transcript.txt`
   - `transcript.md`
-- Basic creator/video folder layout:
+- Platform-aware creator/video folder layout:
+  - `library/<platform>/<creator>/<video title - id>/`
+- Legacy cache compatibility for complete old folders:
   - `library/<creator>/<video title - id>/`
 
 Not yet implemented:
 
 - GUI.
-- YouTube/Douyin-specific polish.
+- YouTube/Douyin-specific polish beyond the generic `yt-dlp` path.
 - Series management.
 - Creator subscriptions.
 - Database/indexing.
@@ -110,6 +113,22 @@ Compile modules:
 .\.venv\Scripts\python.exe -m compileall clipvault
 ```
 
+Run tests:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+## Manual Platform Samples
+
+Use these real-world samples when a development task needs manual or integration-style platform validation. Do not make normal unit tests depend on these links or creators; platform pages and subtitles can change.
+
+- Bilibili: 马督公《睡前消息》系列.
+- YouTube: Jabzy, `History of the Middle East` series.
+- Douyin: 王朝董事会《大明王朝》系列.
+
+When testing with these samples, record the exact URL, date, whether subtitles were platform-provided or ASR-generated, output path, and any platform-specific failure in `logs/development/`.
+
 ## Development Rules
 
 - Keep the project focused on transcript acquisition and transcript library maintenance.
@@ -121,6 +140,8 @@ Compile modules:
 - Use UTF-8 for documentation and generated text.
 - Every development task must be planned around a clear target and executed step by step. After completing each meaningful step, write a corresponding development log entry under `logs/development/`.
 - Code changes must include user-visible program logging where appropriate. Features should report what they are doing, what succeeded, what failed, and enough diagnostic context to make bug reports actionable. Program log conventions and examples belong under `logs/program/`.
+- Cache reuse must be based on completed manifest state and actual transcript files, not only on a single marker field or `transcript.md`.
+- ASR currently runs with local model files only. Do not write user-facing messages that imply ClipVault will automatically download models unless that behavior is implemented and tested.
 
 ## Logs
 
@@ -193,6 +214,7 @@ Before committing:
 Remove-Item -LiteralPath clipvault\__pycache__ -Recurse -Force -ErrorAction SilentlyContinue
 .\clipvault.ps1 --help
 .\.venv\Scripts\python.exe -m pip check
+.\.venv\Scripts\python.exe -m pytest -q
 git status --short --ignored
 ```
 
@@ -200,8 +222,8 @@ git status --short --ignored
 
 Recommended next steps:
 
-1. Add tests for subtitle parsing and exporters.
-2. Improve `manifest.json` schema for future series/library management.
-3. Add YouTube support validation using the existing `yt-dlp` path.
-4. Add a clean library layout for platform/creator/series/video.
-5. Add series assignment later, starting with manual `--series`.
+1. Harden Bilibili behavior with focused real-link regression cases.
+2. Add explicit platform abstraction boundaries before adding more platforms.
+3. Add series assignment later, starting with manual `--series`.
+4. Add creator-level indexes after the manifest shape is stable.
+5. Keep GUI and AI features out of scope until transcript acquisition and library maintenance are dependable.

@@ -13,16 +13,21 @@ Implemented as of the current baseline:
 - CLI command: `clipvault`.
 - Windows launcher: `clipvault.ps1`.
 - Bilibili URL processing through `yt-dlp`.
+- YouTube subtitle pipeline validation through the generic `yt-dlp` path.
 - Platform subtitles/automatic captions when available.
 - Audio download fallback when subtitles are unavailable.
 - Local ASR through `faster-whisper`.
 - CUDA auto-selection with CPU fallback.
+- Unit tests for subtitle parsing, exporters, and library helpers.
+- User-visible stderr logs for pipeline stages.
 - Outputs:
   - `manifest.json`
   - `transcript.srt`
   - `transcript.txt`
   - `transcript.md`
 - Current library layout:
+  - `library/<platform>/<creator>/<video title - id>/`
+- Legacy cache compatibility:
   - `library/<creator>/<video title - id>/`
 - Dependency split:
   - `requirements.lock` for base dependencies.
@@ -47,10 +52,24 @@ Implemented as of the current baseline:
 - Make runtime behavior observable through program logs.
 - Record meaningful development steps in `logs/development/`.
 - Keep the project friendly to future open source contributors.
+- Treat cache entries as complete only when manifest state and actual output files agree.
+- Keep ASR model behavior explicit: local-only unless automatic model download is intentionally added.
+
+## Manual Validation Samples
+
+Use these samples for manual and integration-style checks when validating platform behavior. They are intentionally not part of the default unit test suite because external platform content, subtitles, and access rules can change.
+
+- Bilibili: 马督公《睡前消息》系列.
+- YouTube: Jabzy, `History of the Middle East` series.
+- Douyin: 王朝董事会《大明王朝》系列.
+
+For each manual validation, log the exact URL, date, transcript source, output path, and failure mode if any.
 
 ## Phase 1: Stabilize Transcript Core
 
 Goal: make the existing transcript pipeline reliable, testable, and maintainable.
+
+Status: completed in commit `e2e571c`, with follow-up review fixes after Phase 2.
 
 Planned work:
 
@@ -87,6 +106,8 @@ Success criteria:
 
 Goal: make ClipVault a maintainable transcript library instead of a one-off output script.
 
+Status: completed in commit `650235b`, with follow-up cache/documentation fixes after review.
+
 Planned work:
 
 - Introduce a more future-proof library layout:
@@ -110,6 +131,7 @@ Planned work:
   - `asr_device`.
   - `output_files`.
 - Add cache/reuse behavior based on manifest state, not only `transcript.md`.
+- Verify output files listed by manifest before treating a cache entry as complete.
 
 Success criteria:
 
@@ -220,9 +242,8 @@ These may be revisited only after the transcript vault itself is dependable.
 
 ## Immediate Next Tasks
 
-1. Add development log entry for this roadmap and recent project setup.
-2. Add tests for subtitle parsers and exporters.
-3. Add program logging to the current CLI pipeline.
-4. Add `schema_version` and processing metadata to `manifest.json`.
-5. Validate YouTube using the existing `yt-dlp` path.
-
+1. Add focused Bilibili hardening tests and real-link regression notes.
+2. Define a small platform adapter interface before adding Douyin-specific logic.
+3. Add manual `--series` support only after the platform/cache boundary is stable.
+4. Add creator-level index design under `docs/plan/` before implementing subscriptions.
+5. Keep GUI and AI note generation out of scope until transcript acquisition is dependable.

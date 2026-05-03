@@ -81,8 +81,8 @@ def transcribe_audio_once(
         if "model" in str(exc).lower() and "not" in str(exc).lower():
             raise RuntimeError(
                 f"ASR model '{resolved_model}' is not available locally. "
-                f"Download it first with: "
-                f"faster-whisper-whisper {resolved_model}  # or set --model to a different size"
+                "ClipVault runs faster-whisper with local_files_only=True, so pre-download the model "
+                "into the Hugging Face cache or pass a local model directory with --model."
             ) from exc
         raise
     segments_iter, _info = model.transcribe(
@@ -145,6 +145,5 @@ def resolve_local_model(model_name: str) -> str:
         snapshots = sorted((path for path in cache_root.iterdir() if path.is_dir()), key=lambda path: path.stat().st_mtime, reverse=True)
         if snapshots:
             return str(snapshots[0])
-    print(f"[asr] model '{model_name}' not found in local cache, will download from HuggingFace", file=sys.stderr)
+    print(f"[asr] model '{model_name}' not found in local cache; ASR requires a local cached model", file=sys.stderr)
     return f"Systran/faster-whisper-{model_name}"
-
