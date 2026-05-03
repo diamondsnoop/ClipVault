@@ -7,8 +7,11 @@ import urllib.request
 from typing import Any
 
 from .models import SubtitleSegment
+from .platforms import platform_languages
 from .text import clean_text, strip_tags
 
+# Default language priority used when no platform context is available.
+# Platform-specific overrides live in platforms.PLATFORMS[]["languages"].
 LANG_PRIORITY = (
     "zh-CN",
     "zh-Hans",
@@ -19,14 +22,21 @@ LANG_PRIORITY = (
 )
 
 
-def get_platform_subtitles(info: dict[str, Any]) -> tuple[list[SubtitleSegment], str]:
+def get_platform_subtitles(
+    info: dict[str, Any],
+    *,
+    platform: str,
+) -> tuple[list[SubtitleSegment], str]:
+    priorities = platform_languages(platform)
+    print(f"[subtitle] language priority: {', '.join(priorities)}", file=sys.stderr)
+
     tracks = []
     for source_name, field in (("subtitle", "subtitles"), ("automatic_caption", "automatic_captions")):
         subtitle_map = info.get(field) or {}
         if not isinstance(subtitle_map, dict):
             continue
         for lang, entries in subtitle_map.items():
-            priority = language_priority(lang)
+            priority = language_priority(lang, priorities)
             if priority is None:
                 continue
             for entry in entries or []:
@@ -48,13 +58,14 @@ def get_platform_subtitles(info: dict[str, Any]) -> tuple[list[SubtitleSegment],
     return [], "none"
 
 
-def language_priority(lang: str) -> int | None:
+def language_priority(lang: str, priorities: tuple[str, ...] = LANG_PRIORITY) -> int | None:
     normalized = lang.strip()
-    for index, candidate in enumerate(LANG_PRIORITY):
+    for index, candidate in enumerate(priorities):
         if normalized == candidate or normalized.lower().startswith(candidate.lower()):
             return index
+    # Chinese variants not listed still get a slot (after all explicit entries).
     if normalized.lower().startswith("zh"):
-        return 10
+        return len(priorities) + 10
     return None
 
 

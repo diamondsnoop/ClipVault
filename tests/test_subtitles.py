@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from clipvault.subtitles import (
+    get_platform_subtitles,
     language_priority,
     parse_json_subtitle,
     parse_srt,
@@ -215,3 +216,122 @@ def test_parse_subtitle_dispatch_auto_json():
 def test_parse_subtitle_empty_returns_empty():
     assert parse_subtitle("", "srt") == []
     assert parse_subtitle("   ", "vtt") == []
+
+
+# ── language_priority with custom platform priorities ──────────────────
+
+
+def test_language_priority_bilibili():
+    """Bilibili priority: zh-CN (index 0), en (index 5)."""
+    priorities = ("zh-CN", "zh-Hans", "zh-Hans-CN", "zh", "cmn-Hans-CN", "en")
+    assert language_priority("zh-CN", priorities) == 0
+    assert language_priority("en", priorities) == 5
+    assert language_priority("ja", priorities) is None
+
+
+def test_language_priority_youtube():
+    """YouTube priority: en (index 0), zh-CN (index 1)."""
+    priorities = ("en", "zh-CN", "zh-Hans", "zh")
+    assert language_priority("en", priorities) == 0
+    assert language_priority("zh-CN", priorities) == 1
+    assert language_priority("zh-TW", priorities) == 3  # matches "zh"
+
+
+def test_language_priority_unknown_platform():
+    """Unknown platform falls back to ('en',) -- only English is known.
+    Chinese variants still get a fallback slot via the zh- rule."""
+    assert language_priority("en", ("en",)) == 0
+    assert language_priority("zh-CN", ("en",)) == 11  # len(("en",)) + 10
+    assert language_priority("ja", ("en",)) is None
+
+
+# ── get_platform_subtitles with mocked fetch_text ──────────────────────
+
+
+def test_get_platform_subtitles_priority(monkeypatch):
+    """Bilibili platform picks zh-CN over en when both are available."""
+    zh_json = json.dumps({"body": [{"from": 0.0, "to": 1.0, "content": "中文"}]})
+    en_json = json.dumps({"body": [{"from": 0.0, "to": 1.0, "content": "english"}]})
+
+    def _fake_subtitle_map(url: str) -> str:
+        if "lang=zh-Hans" in url:
+            return zh_json
+        if "lang=en" in url:
+            return en_json
+        return '{"body": []}'
+
+    import clipvault.subtitles as S
+    monkeypatch.setattr(S, "fetch_text", _fake_subtitle_map)
+
+    info = {
+        "subtitles": {
+            "zh-Hans": [{"url": "http://example.com/sub?lang=zh-Hans&ext=json", "ext": "json"}],
+            "en": [{"url": "http://example.com/sub?lang=en&ext=json", "ext": "json"}],
+        },
+        "automatic_captions": {},
+    }
+    segments, source = S.get_platform_subtitles(info, platform="bilibili")
+    assert len(segments) == 1
+    assert "中文" in segments[0].text
+    assert source.startswith("subtitle:zh-Hans")
+
+
+def test_get_platform_subtitles_youtube_prefers_en(monkeypatch):
+    """YouTube platform picks en over zh-CN when both are available."""
+    zh_json = json.dumps({"body": [{"from": 0.0, "to": 1.0, "content": "中文"}]})
+    en_json = json.dumps({"body": [{"from": 0.0, "to": 1.0, "content": "english"}]})
+
+    def _fake_fetch(url: str) -> str:
+        if "lang=en" in url:
+            return en_json
+        return zh_json
+
+    import clipvault.subtitles as S
+    monkeypatch.setattr(S, "fetch_text", _fake_fetch)
+
+    info = {
+        "subtitles": {
+            "zh-Hans": [{"url": "http://example.com/sub?lang=zh-Hans&ext=json", "ext": "json"}],
+            "en": [{"url": "http://example.com/sub?lang=en&ext=json", "ext": "json"}],
+        },
+        "automatic_captions": {},
+    }
+    segments, source = S.get_platform_subtitles(info, platform="youtube")
+    assert len(segments) == 1
+    assert "english" in segments[0].text
+    assert source.startswith("subtitle:en")
+
+
+def test_get_platform_subtitles_ext_priority(monkeypatch):
+    """Within same language, json3 is preferred over vtt."""
+    json3_data = json.dumps({"body": [{"from": 0.0, "to": 1.0, "content": "json3"}]})
+    vtt_data = "WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nvtt"
+
+    def _fake_fetch(url: str) -> str:
+        if "ext=json3" in url:
+            return json3_data
+        return vtt_data
+
+    import clipvault.subtitles as S
+    monkeypatch.setattr(S, "fetch_text", _fake_fetch)
+
+    info = {
+        "subtitles": {
+            "en": [
+                {"url": "http://example.com/sub?ext=vtt", "ext": "vtt"},
+                {"url": "http://example.com/sub?ext=json3", "ext": "json3"},
+            ],
+        },
+        "automatic_captions": {},
+    }
+    segments, source = S.get_platform_subtitles(info, platform="youtube")
+    assert len(segments) == 1
+    assert "json3" in segments[0].text
+
+
+def test_get_platform_subtitles_no_subtitles(monkeypatch):
+    """When no subtitles match, returns empty list and 'none'."""
+    info = {"subtitles": {}, "automatic_captions": {}}
+    segments, source = get_platform_subtitles(info, platform="youtube")
+    assert segments == []
+    assert source == "none"

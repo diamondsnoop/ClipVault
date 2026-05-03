@@ -110,7 +110,7 @@ def process_video(
     manifest = build_manifest(info, url=url, title=title, uploader=uploader, video_id=video_id)
     write_json(video_dir / "manifest.json", manifest)
 
-    segments, source = get_platform_subtitles(info)
+    segments, source = get_platform_subtitles(info, platform=platform)
     if not segments:
         print("[pipeline] no subtitles found, falling back to ASR", file=sys.stderr)
         audio_path = download_audio(url, video_dir, verbose=verbose)
