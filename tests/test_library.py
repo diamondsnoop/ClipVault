@@ -11,6 +11,7 @@ from clipvault.library import (
     is_completed,
     legacy_video_directory,
     normalize_series,
+    rebuild_library_indexes,
     resolve_video_directory,
     safe_name,
     series_index_path,
@@ -449,6 +450,26 @@ def _make_manifest(*, video_id: str, title: str, uploader: str = "U", platform: 
     return m
 
 
+def _write_completed_video(
+    library: Path,
+    *,
+    video_id: str,
+    title: str,
+    uploader: str = "U",
+    platform: str = "youtube",
+    series: str | None = None,
+    **kw: str,
+) -> Path:
+    video_dir = video_directory(library, platform=platform, uploader=uploader, title=title, video_id=video_id, series=series)
+    video_dir.mkdir(parents=True)
+    manifest = _make_manifest(video_id=video_id, title=title, uploader=uploader, platform=platform, series=series, **kw)
+    write_json(video_dir / "manifest.json", manifest)
+    (video_dir / "transcript.srt").write_text("", encoding="utf-8")
+    (video_dir / "transcript.txt").write_text("", encoding="utf-8")
+    (video_dir / "transcript.md").write_text("", encoding="utf-8")
+    return video_dir
+
+
 def test_creator_index_created_no_series(tmp_path: Path):
     """A video without series creates a creator _index.json."""
     video_dir = video_directory(tmp_path, platform="youtube", uploader="Jabzy", title="Video One", video_id="v1")
@@ -683,3 +704,127 @@ def test_series_index_sort_order(tmp_path: Path):
     # Same processed_at: Alpha before Zeta (title ascending)
     assert data["videos"][0]["video_id"] == "v2"  # Alpha
     assert data["videos"][1]["video_id"] == "v1"  # Zeta
+
+
+# ── rebuild_library_indexes ───────────────────────────────────────────
+
+
+def test_rebuild_indexes_empty_library(tmp_path: Path):
+    result = rebuild_library_indexes(tmp_path)
+
+    assert result["status"] == "ok"
+    assert result["manifests_seen"] == 0
+    assert result["videos_indexed"] == 0
+    assert result["indexes"] == []
+
+
+def test_rebuild_indexes_single_no_series(tmp_path: Path):
+    _write_completed_video(tmp_path, video_id="v1", title="Video One", uploader="Jabzy", platform="youtube")
+
+    result = rebuild_library_indexes(tmp_path)
+
+    c_path = creator_index_path(tmp_path, platform="youtube", uploader="Jabzy")
+    assert c_path.exists()
+    data = json.loads(c_path.read_text(encoding="utf-8"))
+    assert data["type"] == "creator"
+    assert data["videos"][0]["video_id"] == "v1"
+    assert data["videos"][0]["series"] is None
+    assert data["series"] == []
+    assert result["videos_indexed"] == 1
+    assert not (tmp_path / "youtube" / "Jabzy" / "Any" / "_index.json").exists()
+
+
+def test_rebuild_indexes_mixed_series_and_no_series(tmp_path: Path):
+    _write_completed_video(tmp_path, video_id="v1", title="Alpha", uploader="U", series="S")
+    _write_completed_video(tmp_path, video_id="v2", title="Beta", uploader="U", series=None)
+
+    rebuild_library_indexes(tmp_path)
+
+    c_path = creator_index_path(tmp_path, platform="youtube", uploader="U")
+    c_data = json.loads(c_path.read_text(encoding="utf-8"))
+    assert {v["video_id"] for v in c_data["videos"]} == {"v1", "v2"}
+    assert c_data["series"] == [{"name": "S", "video_count": 1, "latest_processed_at": c_data["series"][0]["latest_processed_at"]}]
+
+    s_path = series_index_path(tmp_path, platform="youtube", uploader="U", series="S")
+    assert s_path is not None
+    s_data = json.loads(s_path.read_text(encoding="utf-8"))
+    assert [v["video_id"] for v in s_data["videos"]] == ["v1"]
+
+
+def test_rebuild_indexes_multiple_platforms_and_creators(tmp_path: Path):
+    _write_completed_video(tmp_path, video_id="yt1", title="YT", uploader="A", platform="youtube")
+    _write_completed_video(tmp_path, video_id="bv1", title="BV", uploader="A", platform="bilibili")
+    _write_completed_video(tmp_path, video_id="yt2", title="Other", uploader="B", platform="youtube")
+
+    rebuild_library_indexes(tmp_path)
+
+    assert (tmp_path / "youtube" / "A" / "_index.json").exists()
+    assert (tmp_path / "bilibili" / "A" / "_index.json").exists()
+    assert (tmp_path / "youtube" / "B" / "_index.json").exists()
+    yt_a = json.loads((tmp_path / "youtube" / "A" / "_index.json").read_text(encoding="utf-8"))
+    assert [v["video_id"] for v in yt_a["videos"]] == ["yt1"]
+
+
+def test_rebuild_indexes_removes_stale_index_entries(tmp_path: Path):
+    stale_dir = _write_completed_video(tmp_path, video_id="stale", title="Stale", uploader="U")
+    keep_dir = _write_completed_video(tmp_path, video_id="keep", title="Keep", uploader="U")
+    rebuild_library_indexes(tmp_path)
+    (stale_dir / "manifest.json").unlink()
+
+    rebuild_library_indexes(tmp_path)
+
+    c_data = json.loads((tmp_path / "youtube" / "U" / "_index.json").read_text(encoding="utf-8"))
+    assert [v["video_id"] for v in c_data["videos"]] == ["keep"]
+    assert keep_dir.exists()
+
+
+def test_rebuild_indexes_deduplicates_video_id(tmp_path: Path):
+    _write_completed_video(tmp_path, video_id="dup", title="First", uploader="U")
+    _write_completed_video(tmp_path, video_id="dup", title="Second", uploader="U")
+
+    rebuild_library_indexes(tmp_path)
+
+    c_data = json.loads((tmp_path / "youtube" / "U" / "_index.json").read_text(encoding="utf-8"))
+    assert len(c_data["videos"]) == 1
+    assert c_data["videos"][0]["video_id"] == "dup"
+
+    result = rebuild_library_indexes(tmp_path)
+    assert result["videos_indexed"] == 1
+
+
+def test_rebuild_indexes_removes_stale_index_file(tmp_path: Path):
+    _write_completed_video(tmp_path, video_id="v1", title="Series Video", uploader="U", series="Old Series")
+    rebuild_library_indexes(tmp_path)
+    s_path = tmp_path / "youtube" / "U" / "Old Series" / "_index.json"
+    assert s_path.exists()
+    (tmp_path / "youtube" / "U" / "Old Series" / "Series Video - v1" / "manifest.json").unlink()
+
+    result = rebuild_library_indexes(tmp_path)
+
+    assert not s_path.exists()
+    assert str(s_path) in result["stale_indexes"]
+
+
+def test_rebuild_indexes_skips_bad_manifest(tmp_path: Path, capsys):
+    bad_dir = tmp_path / "youtube" / "U" / "Bad - bad"
+    bad_dir.mkdir(parents=True)
+    (bad_dir / "manifest.json").write_text("{bad", encoding="utf-8")
+    _write_completed_video(tmp_path, video_id="good", title="Good", uploader="U")
+
+    result = rebuild_library_indexes(tmp_path)
+
+    stderr = capsys.readouterr().err
+    assert "skipped manifest" in stderr
+    assert len(result["skipped_manifests"]) == 1
+    c_data = json.loads((tmp_path / "youtube" / "U" / "_index.json").read_text(encoding="utf-8"))
+    assert [v["video_id"] for v in c_data["videos"]] == ["good"]
+
+
+def test_rebuild_indexes_dry_run_does_not_write(tmp_path: Path):
+    _write_completed_video(tmp_path, video_id="v1", title="Video", uploader="U")
+
+    result = rebuild_library_indexes(tmp_path, dry_run=True)
+
+    assert result["dry_run"] is True
+    assert result["indexes"]
+    assert not (tmp_path / "youtube" / "U" / "_index.json").exists()

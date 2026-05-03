@@ -200,11 +200,28 @@ Optional title-matching rules to auto-assign series when `--series` is not passe
 - Missing or invalid rule file is non-blocking (logged, not crashed).
 - Implemented in a new `clipvault/series_rules.py` module.
 
+### Phase 4 Step 4 — Library Index Rebuild (completed)
+
+Maintenance command for recovering index state from existing local manifests:
+
+```powershell
+clipvault library rebuild-index
+clipvault library rebuild-index --library "E:\VideoSubs"
+clipvault library rebuild-index --library "E:\VideoSubs" --dry-run
+```
+
+- Scans completed `manifest.json` entries under the library.
+- Rebuilds creator and series `_index.json` files from scratch.
+- Removes stale index files and stale video entries when manifests disappear.
+- Skips invalid or incomplete manifests with `[index] skipped manifest (...)` logs.
+- Does not download videos, fetch subtitles, or run ASR.
+
 Success criteria:
 
 - A user can group videos from the same creator into a named series. ✅
 - Future creator subscriptions can build on the same metadata. ✅ (index foundation) ✅
 - Series can be auto-assigned by title pattern without requiring `--series`. ✅
+- Indexes can be rebuilt from disk if they become stale. ✅
 
 ## Phase 5: Creator Tracking and Batch Ingestion
 

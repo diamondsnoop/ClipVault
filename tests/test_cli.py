@@ -357,3 +357,47 @@ def test_process_video_cache_hit_auto_series(tmp_path: Path, monkeypatch):
     c_data = json.loads(c_path.read_text(encoding="utf-8"))
     assert len(c_data["videos"]) == 1
     assert c_data["videos"][0]["video_id"] == "vid4"
+
+
+# ── Library maintenance CLI ───────────────────────────────────────────
+
+
+def test_process_library_rebuild_index_command(tmp_path: Path):
+    from clipvault.cli import process_library_command
+    from clipvault.library import video_directory, write_json
+
+    video_dir = video_directory(tmp_path, platform="youtube", uploader="U", title="T", video_id="v1")
+    video_dir.mkdir(parents=True)
+    write_json(
+        video_dir / "manifest.json",
+        {
+            "schema_version": 1,
+            "title": "T",
+            "uploader": "U",
+            "video_id": "v1",
+            "source_url": "https://youtube.com/watch?v=v1",
+            "platform": "youtube",
+            "series": None,
+            "processed_at": "2026-01-01T00:00:00+00:00",
+            "subtitle_source": "subtitle:en:json3",
+            "output_files": ["transcript.srt", "transcript.txt", "transcript.md"],
+        },
+    )
+    (video_dir / "transcript.srt").write_text("", encoding="utf-8")
+    (video_dir / "transcript.txt").write_text("", encoding="utf-8")
+    (video_dir / "transcript.md").write_text("", encoding="utf-8")
+
+    result = process_library_command(["rebuild-index", "--library", str(tmp_path)])
+
+    assert result["status"] == "ok"
+    assert result["videos_indexed"] == 1
+    assert (tmp_path / "youtube" / "U" / "_index.json").exists()
+
+
+def test_process_library_rebuild_index_dry_run(tmp_path: Path):
+    from clipvault.cli import process_library_command
+
+    result = process_library_command(["rebuild-index", "--library", str(tmp_path), "--dry-run"])
+
+    assert result["status"] == "ok"
+    assert result["dry_run"] is True

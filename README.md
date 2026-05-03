@@ -96,6 +96,16 @@ Indexes are plain JSON files — no database, no external dependencies. They are
 
 Old `library/<creator>/<video title - id>/` folders remain readable for cache compatibility when their manifest and output files are complete.
 
+If index files are deleted, stale, or inconsistent, rebuild them from existing completed manifests:
+
+```powershell
+.\clipvault.ps1 library rebuild-index
+.\clipvault.ps1 library rebuild-index --library "E:\VideoSubs"
+.\clipvault.ps1 library rebuild-index --library "E:\VideoSubs" --dry-run
+```
+
+`rebuild-index` is local-only maintenance. It does not download videos, fetch subtitles, or run ASR.
+
 ## Common Commands
 
 ```powershell
@@ -110,6 +120,9 @@ Old `library/<creator>/<video title - id>/` folders remain readable for cache co
 
 # Use a smaller ASR model
 .\clipvault.ps1 "https://www.bilibili.com/video/BV..." --model tiny
+
+# Rebuild creator and series indexes from completed local manifests
+.\clipvault.ps1 library rebuild-index
 ```
 
 ## Auto Series Rules

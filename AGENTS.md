@@ -53,6 +53,7 @@ Library indexes (auto-maintained):
 - `library/<platform>/<creator>/_index.json` — creator index with all videos and series aggregation.
 - `library/<platform>/<creator>/<series>/_index.json` — series index (created only when `--series` is used).
 - Indexes are updated on both new processing and cache hits.
+- Indexes can be rebuilt from completed manifests with `clipvault library rebuild-index`.
 - Indexes are plain JSON, no database required.
 
 Not yet implemented:
@@ -147,6 +148,13 @@ Run tests:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
+```
+
+Rebuild local indexes without downloading or transcribing:
+
+```powershell
+.\clipvault.ps1 library rebuild-index
+.\clipvault.ps1 library rebuild-index --dry-run
 ```
 
 ## Manual Platform Samples

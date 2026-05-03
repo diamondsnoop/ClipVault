@@ -14,6 +14,7 @@ from .library import (
     first_text,
     guess_platform,
     is_completed,
+    rebuild_library_indexes,
     resolve_video_directory,
     update_library_indexes,
     update_manifest,
@@ -29,6 +30,12 @@ DEFAULT_LIBRARY = Path.cwd() / "library"
 
 
 def main(argv: list[str] | None = None) -> None:
+    raw_args = sys.argv[1:] if argv is None else argv
+    if raw_args and raw_args[0] == "library":
+        result = process_library_command(raw_args[1:])
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
     parser = argparse.ArgumentParser(
         prog="clipvault",
         description="Fetch video subtitles, or run ASR when subtitles are unavailable.",
@@ -52,7 +59,7 @@ def main(argv: list[str] | None = None) -> None:
         default=None,
         help="Optional series name for library grouping.",
     )
-    args = parser.parse_args(argv)
+    args = parser.parse_args(raw_args)
 
     try:
         result = process_video(
@@ -71,6 +78,29 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(1) from exc
 
     print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def process_library_command(argv: list[str] | None = None) -> dict[str, Any]:
+    parser = argparse.ArgumentParser(
+        prog="clipvault library",
+        description="Maintain the local ClipVault library.",
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    rebuild_parser = subparsers.add_parser(
+        "rebuild-index",
+        help="Rebuild creator and series indexes from existing manifests.",
+    )
+    rebuild_parser.add_argument("--library", type=Path, default=DEFAULT_LIBRARY, help="Subtitle library root.")
+    rebuild_parser.add_argument("--dry-run", action="store_true", help="Report planned changes without writing indexes.")
+
+    args = parser.parse_args(argv)
+    if args.command == "rebuild-index":
+        try:
+            return rebuild_library_indexes(args.library, dry_run=args.dry_run)
+        except Exception as exc:  # noqa: BLE001 - CLI should report cleanly
+            print(f"[error] {exc}", file=sys.stderr)
+            raise SystemExit(1) from exc
+    raise SystemExit(2)
 
 
 def process_video(

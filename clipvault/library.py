@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -120,6 +121,23 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _sort_video_entries(videos: list[dict[str, Any]]) -> None:
+    """Sort video entries by processed_at descending, then title ascending."""
+    videos.sort(key=lambda v: v.get("title") or "")
+    videos.sort(key=lambda v: v.get("processed_at") or "", reverse=True)
+
+
+def _dedupe_video_entries(videos: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Deduplicate video entries by video_id, keeping the last scanned entry."""
+    deduped: dict[str, dict[str, Any]] = {}
+    for video in videos:
+        key = str(video.get("video_id") or video.get("relative_path") or len(deduped))
+        deduped[key] = video
+    result = list(deduped.values())
+    _sort_video_entries(result)
+    return result
+
+
 def creator_index_path(library: Path, *, platform: str, uploader: str) -> Path:
     """Path to the creator-level ``_index.json``."""
     return library / safe_name(platform) / safe_name(uploader) / "_index.json"
@@ -166,8 +184,6 @@ def update_library_indexes(video_dir: Path, manifest: dict[str, Any], library: P
     * Videos are deduplicated by ``video_id`` — later runs overwrite earlier entries.
     * Indexes are sorted by ``processed_at`` descending, then title ascending.
     """
-    import sys  # noqa: PLC0415 — avoid circular import at module level
-
     platform = manifest.get("platform")
     uploader = manifest.get("uploader")
     video_id = manifest.get("video_id")
@@ -224,8 +240,7 @@ def update_library_indexes(video_dir: Path, manifest: dict[str, Any], library: P
         for s_name, info in sorted(agg.items(), key=lambda x: x[0])
     ]
     # Sort: processed_at descending, then title ascending (stable sort)
-    c_index["videos"].sort(key=lambda v: v.get("title") or "")
-    c_index["videos"].sort(key=lambda v: v.get("processed_at") or "", reverse=True)
+    _sort_video_entries(c_index["videos"])
     c_index["updated_at"] = now
 
     write_json(c_path, c_index)
@@ -262,13 +277,168 @@ def update_library_indexes(video_dir: Path, manifest: dict[str, Any], library: P
     else:
         s_index["videos"].append(series_entry)
 
-    s_index["videos"].sort(key=lambda v: v.get("title") or "")
-    s_index["videos"].sort(key=lambda v: v.get("processed_at") or "", reverse=True)
+    _sort_video_entries(s_index["videos"])
     s_index["video_count"] = len(s_index["videos"])
     s_index["updated_at"] = now
 
     write_json(s_path, s_index)
     print(f"[index] series: {s_path}", file=sys.stderr)
+
+
+def _required_text(data: dict[str, Any], field: str) -> str:
+    value = data.get(field)
+    if value is None or not str(value).strip():
+        raise ValueError(f"missing required field: {field}")
+    return str(value).strip()
+
+
+def _manifest_video_entry(library: Path, manifest_path: Path, manifest: dict[str, Any]) -> tuple[Path, Path, dict[str, Any]]:
+    platform = _required_text(manifest, "platform")
+    uploader = _required_text(manifest, "uploader")
+    _required_text(manifest, "video_id")
+    series = normalize_series(manifest.get("series"))
+
+    video_dir = manifest_path.parent
+    creator_root = library / safe_name(platform) / safe_name(uploader)
+    try:
+        creator_relative = video_dir.relative_to(creator_root).as_posix()
+    except ValueError as exc:
+        raise ValueError(f"manifest is outside expected creator path: {creator_root}") from exc
+
+    entry = _video_entry(manifest, relative_path=creator_relative)
+    if not series:
+        return creator_root, video_dir, entry
+
+    series_root = creator_root / safe_name(series)
+    try:
+        series_relative = video_dir.relative_to(series_root).as_posix()
+    except ValueError as exc:
+        raise ValueError(f"manifest is outside expected series path: {series_root}") from exc
+
+    series_entry = dict(entry)
+    series_entry["relative_path"] = series_relative
+    return creator_root, series_root, series_entry
+
+
+def rebuild_library_indexes(library: Path, *, dry_run: bool = False) -> dict[str, Any]:
+    """Rebuild creator and series indexes from completed manifests.
+
+    This is a full rebuild: desired indexes are generated from current
+    ``manifest.json`` files, and stale ``_index.json`` files are removed
+    when ``dry_run`` is false.
+    """
+    print(f"[library] scanning: {library}", file=sys.stderr)
+    now = datetime.now(timezone.utc).isoformat()
+    existing_indexes = {path for path in library.rglob("_index.json") if path.is_file()}
+    creator_videos: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    series_videos: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    manifests_seen = 0
+    skipped: list[dict[str, str]] = []
+
+    for manifest_path in sorted(library.rglob("manifest.json")):
+        manifests_seen += 1
+        video_dir = manifest_path.parent
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if not isinstance(manifest, dict):
+                raise ValueError("manifest must be a JSON object")
+            if not is_completed(video_dir):
+                raise ValueError("manifest is incomplete or output files are missing")
+            platform = _required_text(manifest, "platform")
+            uploader = _required_text(manifest, "uploader")
+            series = normalize_series(manifest.get("series"))
+            creator_root, index_root, entry = _manifest_video_entry(library, manifest_path, manifest)
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            print(f"[index] skipped manifest ({manifest_path}): {exc}", file=sys.stderr)
+            skipped.append({"path": str(manifest_path), "reason": str(exc)})
+            continue
+
+        creator_key = (platform, uploader)
+        creator_videos.setdefault(creator_key, []).append(
+            _video_entry(manifest, relative_path=video_dir.relative_to(creator_root).as_posix()),
+        )
+        if series:
+            series_videos.setdefault((platform, uploader, series), []).append(entry)
+
+    desired_indexes: dict[Path, dict[str, Any]] = {}
+    for (platform, uploader), videos in sorted(creator_videos.items()):
+        videos = _dedupe_video_entries(videos)
+        series_agg: dict[str, dict[str, Any]] = {}
+        for video in videos:
+            series = normalize_series(video.get("series"))
+            if not series:
+                continue
+            if series not in series_agg:
+                series_agg[series] = {"count": 0, "latest": ""}
+            series_agg[series]["count"] += 1
+            processed_at = video.get("processed_at") or ""
+            if processed_at > series_agg[series]["latest"]:
+                series_agg[series]["latest"] = processed_at
+
+        desired_indexes[creator_index_path(library, platform=platform, uploader=uploader)] = {
+            "schema_version": INDEX_SCHEMA_VERSION,
+            "type": "creator",
+            "platform": platform,
+            "creator": uploader,
+            "updated_at": now,
+            "series": [
+                {"name": name, "video_count": info["count"], "latest_processed_at": info["latest"]}
+                for name, info in sorted(series_agg.items(), key=lambda item: item[0])
+            ],
+            "videos": videos,
+        }
+
+    for (platform, uploader, series), videos in sorted(series_videos.items()):
+        videos = _dedupe_video_entries(videos)
+        path = series_index_path(library, platform=platform, uploader=uploader, series=series)
+        if path is None:
+            continue
+        desired_indexes[path] = {
+            "schema_version": INDEX_SCHEMA_VERSION,
+            "type": "series",
+            "platform": platform,
+            "creator": uploader,
+            "series": series,
+            "updated_at": now,
+            "video_count": len(videos),
+            "videos": videos,
+        }
+
+    stale_indexes = sorted(existing_indexes - set(desired_indexes))
+    if dry_run:
+        print(
+            f"[index] dry-run: would write {len(desired_indexes)} indexes, remove {len(stale_indexes)} stale indexes",
+            file=sys.stderr,
+        )
+    else:
+        for path, data in sorted(desired_indexes.items(), key=lambda item: str(item[0])):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            write_json(path, data)
+            if data.get("type") == "creator":
+                print(f"[index] rebuilt creator: {path}", file=sys.stderr)
+            else:
+                print(f"[index] rebuilt series: {path}", file=sys.stderr)
+        for path in stale_indexes:
+            try:
+                path.unlink()
+                print(f"[index] removed stale: {path}", file=sys.stderr)
+            except OSError as exc:
+                print(f"[index] failed removing stale ({path}): {exc}", file=sys.stderr)
+
+    return {
+        "status": "ok",
+        "library": str(library),
+        "dry_run": dry_run,
+        "manifests_seen": manifests_seen,
+        "videos_indexed": sum(
+            len(index["videos"])
+            for index in desired_indexes.values()
+            if index.get("type") == "creator"
+        ),
+        "skipped_manifests": skipped,
+        "indexes": [str(path) for path in sorted(desired_indexes)],
+        "stale_indexes": [str(path) for path in stale_indexes],
+    }
 
 
 def first_text(data: dict[str, Any], *keys: str, default: str) -> str:
