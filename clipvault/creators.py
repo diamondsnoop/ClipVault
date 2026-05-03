@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .library import safe_name, write_json
+from .library import is_completed, safe_name, write_json
 from .platforms import extract_creator_entries, identify_platform
 
 
@@ -98,6 +98,29 @@ def find_creator_source(library: Path, selector: str) -> dict[str, Any]:
     raise ValueError(f"creator source not found: {selector}")
 
 
+def _processed_video_lookup(library: Path) -> tuple[set[str], set[str]]:
+    video_ids: set[str] = set()
+    urls: set[str] = set()
+    for manifest_path in library.rglob("manifest.json"):
+        video_dir = manifest_path.parent
+        if not is_completed(video_dir):
+            continue
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(manifest, dict):
+            continue
+        video_id = manifest.get("video_id")
+        if video_id:
+            video_ids.add(str(video_id))
+        for key in ("source_url", "webpage_url"):
+            value = manifest.get(key)
+            if value:
+                urls.add(str(value).rstrip("/"))
+    return video_ids, urls
+
+
 def fetch_creator_videos(
     library: Path,
     *,
@@ -112,6 +135,21 @@ def fetch_creator_videos(
     record = find_creator_source(library, selector)
     print(f"[creator] fetching: {record.get('name')} ({record.get('platform')})", file=sys.stderr)
     entries = extract_creator_entries(str(record["source_url"]), limit=limit, verbose=verbose)
+    processed_ids, processed_urls = _processed_video_lookup(library)
+    annotated_entries: list[dict[str, Any]] = []
+    for entry in entries:
+        annotated = dict(entry)
+        entry_id = annotated.get("id")
+        entry_url = str(annotated.get("url") or "").rstrip("/")
+        annotated["library_status"] = (
+            "processed"
+            if (entry_id and str(entry_id) in processed_ids) or (entry_url and entry_url in processed_urls)
+            else "new"
+        )
+        annotated_entries.append(annotated)
+    new_count = sum(1 for entry in annotated_entries if entry["library_status"] == "new")
+    processed_count = len(annotated_entries) - new_count
+    print(f"[creator] candidates: {new_count} new, {processed_count} processed", file=sys.stderr)
 
     now = _now()
     for item in registry.get("creators", []):
@@ -126,8 +164,10 @@ def fetch_creator_videos(
         "status": "ok",
         "mode": "preview",
         "creator": record,
-        "entries": entries,
-        "count": len(entries),
+        "entries": annotated_entries,
+        "count": len(annotated_entries),
+        "new_count": new_count,
+        "processed_count": processed_count,
     }
 
 

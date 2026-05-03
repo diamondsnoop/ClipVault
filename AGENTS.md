@@ -62,6 +62,7 @@ Creator source registry (Phase 5 Step 1):
 - `clipvault creator add <url> --name "Display Name"` records or updates a source.
 - `clipvault creator list` prints recorded sources.
 - `clipvault creator fetch <selector>` previews recent entries from a recorded source.
+- Fetch entries include `library_status` as `new` or `processed`.
 - Fetch preview does not process transcripts or queue ASR jobs yet.
 
 Not yet implemented:

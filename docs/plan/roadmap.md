@@ -252,6 +252,8 @@ clipvault creator fetch <creator-id-or-name> --limit 20
 - Uses the recorded `source_url` from `library/_creators.json`.
 - Asks `yt-dlp` for recent flat playlist/channel entries.
 - Returns discovered video titles and URLs as JSON.
+- Marks each entry as `new` or `processed` by comparing with completed local
+  manifests.
 - Updates `last_checked_at`.
 - Does not process transcripts or queue ASR jobs yet.
 
@@ -263,7 +265,7 @@ Planned work:
   - ~~`clipvault creator list`.~~
   - ~~`clipvault creator fetch <creator>`.~~
 - ~~Fetch recent videos from a creator/channel.~~ (preview only)
-- Skip already processed videos.
+- ~~Skip already processed videos.~~ (status marking only)
 - Queue transcript jobs.
 - Report per-video status.
 

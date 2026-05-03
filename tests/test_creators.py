@@ -112,8 +112,48 @@ def test_fetch_creator_videos_preview_updates_checked_at(tmp_path: Path, monkeyp
     assert result["status"] == "ok"
     assert result["mode"] == "preview"
     assert result["count"] == 2
+    assert result["new_count"] == 2
+    assert result["processed_count"] == 0
     registry = load_creator_registry(tmp_path)
     assert registry["creators"][0]["last_checked_at"] is not None
+
+
+def test_fetch_creator_videos_marks_processed_entries(tmp_path: Path, monkeypatch):
+    from clipvault.library import video_directory, write_json
+
+    add_creator_source(tmp_path, source_url="https://www.youtube.com/@Jabzy", name="Jabzy")
+    video_dir = video_directory(tmp_path, platform="youtube", uploader="Jabzy", title="One", video_id="v1")
+    video_dir.mkdir(parents=True)
+    write_json(
+        video_dir / "manifest.json",
+        {
+            "schema_version": 1,
+            "platform": "youtube",
+            "uploader": "Jabzy",
+            "title": "One",
+            "video_id": "v1",
+            "source_url": "https://youtube.com/watch?v=v1",
+            "subtitle_source": "subtitle:en:json3",
+            "output_files": ["transcript.srt", "transcript.txt", "transcript.md"],
+        },
+    )
+    (video_dir / "transcript.srt").write_text("", encoding="utf-8")
+    (video_dir / "transcript.txt").write_text("", encoding="utf-8")
+    (video_dir / "transcript.md").write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "clipvault.creators.extract_creator_entries",
+        lambda url, *, limit, verbose: [
+            {"id": "v1", "title": "One", "url": "https://youtube.com/watch?v=v1"},
+            {"id": "v2", "title": "Two", "url": "https://youtube.com/watch?v=v2"},
+        ],
+    )
+
+    result = fetch_creator_videos(tmp_path, selector="Jabzy", limit=2)
+
+    assert result["processed_count"] == 1
+    assert result["new_count"] == 1
+    assert [entry["library_status"] for entry in result["entries"]] == ["processed", "new"]
 
 
 def test_fetch_creator_videos_rejects_bad_limit(tmp_path: Path):

@@ -189,7 +189,8 @@ Creator records are stored locally in:
 library/_creators.json
 ```
 
-`creator fetch` currently previews recent video entries only. It does not
+`creator fetch` currently previews recent video entries only. Each entry is
+marked as `new` or `processed` based on local completed manifests. It does not
 process transcripts or enqueue ASR jobs yet.
 
 ## Repository Hygiene

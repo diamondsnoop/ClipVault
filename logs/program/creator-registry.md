@@ -12,6 +12,8 @@ Use these prefixes:
 - `[creator] fetching recent entries from <url>` — `yt-dlp` flat extraction is
   starting for a source URL.
 - `[creator] discovered: <count>` — recent-entry discovery completed.
+- `[creator] candidates: <new> new, <processed> processed` — discovered
+  entries were compared with completed local manifests.
 - `[creator] registry: <path>` — registry file path after a write.
 - `[creator] registry load failed (<path>): <reason>` — registry JSON could not
   be read.
