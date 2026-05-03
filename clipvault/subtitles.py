@@ -1,0 +1,153 @@
+from __future__ import annotations
+
+import json
+import re
+import urllib.request
+from typing import Any
+
+from .models import SubtitleSegment
+from .text import clean_text, strip_tags
+
+LANG_PRIORITY = (
+    "zh-CN",
+    "zh-Hans",
+    "zh-Hans-CN",
+    "zh",
+    "cmn-Hans-CN",
+    "en",
+)
+
+
+def get_platform_subtitles(info: dict[str, Any]) -> tuple[list[SubtitleSegment], str]:
+    tracks = []
+    for source_name, field in (("subtitle", "subtitles"), ("automatic_caption", "automatic_captions")):
+        subtitle_map = info.get(field) or {}
+        if not isinstance(subtitle_map, dict):
+            continue
+        for lang, entries in subtitle_map.items():
+            priority = language_priority(lang)
+            if priority is None:
+                continue
+            for entry in entries or []:
+                if isinstance(entry, dict) and entry.get("url"):
+                    tracks.append((priority, source_name, lang, entry))
+
+    tracks.sort(key=lambda item: (item[0], preferred_ext_rank(item[3].get("ext"))))
+    for _, source_name, lang, entry in tracks:
+        try:
+            raw = fetch_text(entry["url"])
+            segments = parse_subtitle(raw, entry.get("ext") or "")
+            if segments:
+                return segments, f"{source_name}:{lang}:{entry.get('ext') or 'unknown'}"
+        except Exception:
+            continue
+    return [], "none"
+
+
+def language_priority(lang: str) -> int | None:
+    normalized = lang.strip()
+    for index, candidate in enumerate(LANG_PRIORITY):
+        if normalized == candidate or normalized.lower().startswith(candidate.lower()):
+            return index
+    if normalized.lower().startswith("zh"):
+        return 10
+    return None
+
+
+def preferred_ext_rank(ext: str | None) -> int:
+    return {"json": 0, "json3": 1, "vtt": 2, "srt": 3}.get((ext or "").lower(), 9)
+
+
+def fetch_text(url: str) -> str:
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(req, timeout=30) as response:  # noqa: S310 - user supplied subtitle URL
+        return response.read().decode("utf-8", errors="replace")
+
+
+def parse_subtitle(raw: str, ext: str) -> list[SubtitleSegment]:
+    text = raw.lstrip("\ufeff").strip()
+    if not text:
+        return []
+    if ext.lower() in {"json", "json3"} or text.startswith("{"):
+        return parse_json_subtitle(text)
+    if "WEBVTT" in text[:64]:
+        return parse_vtt(text)
+    return parse_srt(text)
+
+
+def parse_json_subtitle(raw: str) -> list[SubtitleSegment]:
+    data = json.loads(raw)
+    body = data.get("body") or data.get("events") or []
+    segments: list[SubtitleSegment] = []
+    for item in body:
+        if not isinstance(item, dict):
+            continue
+        if "content" in item:
+            start = float(item.get("from", 0))
+            end = float(item.get("to", start))
+            text = clean_text(str(item.get("content", "")))
+        else:
+            start = float(item.get("tStartMs", 0)) / 1000
+            duration = float(item.get("dDurationMs", 0)) / 1000
+            end = start + duration
+            segs = item.get("segs") or []
+            text = clean_text("".join(str(seg.get("utf8", "")) for seg in segs if isinstance(seg, dict)))
+        if text:
+            segments.append(SubtitleSegment(start=start, end=max(end, start), text=text))
+    return segments
+
+
+def parse_vtt(raw: str) -> list[SubtitleSegment]:
+    segments: list[SubtitleSegment] = []
+    lines = [line.strip("\ufeff") for line in raw.splitlines()]
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        if "-->" not in line:
+            i += 1
+            continue
+        start_s, end_s = split_time_range(line)
+        i += 1
+        content: list[str] = []
+        while i < len(lines) and lines[i].strip():
+            content.append(strip_tags(lines[i].strip()))
+            i += 1
+        text = clean_text(" ".join(content))
+        if text:
+            segments.append(SubtitleSegment(parse_time(start_s), parse_time(end_s), text))
+    return segments
+
+
+def parse_srt(raw: str) -> list[SubtitleSegment]:
+    segments: list[SubtitleSegment] = []
+    blocks = re.split(r"\n\s*\n", raw.replace("\r\n", "\n").replace("\r", "\n"))
+    for block in blocks:
+        lines = [line.strip() for line in block.split("\n") if line.strip()]
+        time_line = next((line for line in lines if "-->" in line), "")
+        if not time_line:
+            continue
+        idx = lines.index(time_line)
+        start_s, end_s = split_time_range(time_line)
+        text = clean_text(" ".join(strip_tags(line) for line in lines[idx + 1 :]))
+        if text:
+            segments.append(SubtitleSegment(parse_time(start_s), parse_time(end_s), text))
+    return segments
+
+
+def split_time_range(line: str) -> tuple[str, str]:
+    left, right = line.split("-->", 1)
+    return left.strip(), right.strip().split()[0]
+
+
+def parse_time(value: str) -> float:
+    value = value.replace(",", ".")
+    parts = value.split(":")
+    if len(parts) == 3:
+        hours, minutes, seconds = parts
+    elif len(parts) == 2:
+        hours, minutes, seconds = "0", parts[0], parts[1]
+    else:
+        return float(value)
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+
