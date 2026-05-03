@@ -205,3 +205,155 @@ def test_process_video_cache_hit_creates_index(tmp_path: Path, monkeypatch):
     s_data = json.loads(s_path.read_text(encoding="utf-8"))
     assert len(s_data["videos"]) == 1
     assert s_data["videos"][0]["video_id"] == "vid1"
+
+
+# ── Auto series rules (Phase 4 Step 3) ─────────────────────────────────
+
+
+def test_process_video_auto_series_via_rule(tmp_path: Path, monkeypatch):
+    """Without --series, a rules-based match assigns series automatically."""
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        "clipvault.cli.extract_info",
+        lambda url, *, verbose: {"title": "My Great Video", "uploader": "U", "id": "vid1"},
+    )
+    monkeypatch.setattr(
+        "clipvault.cli.get_platform_subtitles",
+        lambda info, platform: ([SubtitleSegment(0.0, 1.0, "h")], "subtitle:en:json3"),
+    )
+    monkeypatch.setattr(
+        "clipvault.cli.resolve_series",
+        lambda library, *, platform, uploader, title, explicit_series: ("Auto Series", "rule"),
+    )
+
+    from clipvault.cli import process_video
+
+    result = process_video(
+        url="https://youtube.com/watch?v=vid1",
+        library=tmp_path,
+        model_name="tiny", device="cpu", compute_type="int8",
+        force=True, keep_audio=False, verbose=False,
+        series=None,
+    )
+    assert result["status"] == "ok"
+    assert result["series"] == "Auto Series"
+    assert result["series_source"] == "rule"
+    assert "Auto Series" in result["folder"]
+
+    manifest_path = Path(result["folder"]) / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["series"] == "Auto Series"
+
+
+def test_process_video_manual_series_overrides_rule(tmp_path: Path, monkeypatch):
+    """--series takes priority even when auto-rules would match."""
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        "clipvault.cli.extract_info",
+        lambda url, *, verbose: {"title": "My Great Video", "uploader": "U", "id": "vid2"},
+    )
+    monkeypatch.setattr(
+        "clipvault.cli.get_platform_subtitles",
+        lambda info, platform: ([SubtitleSegment(0.0, 1.0, "h")], "subtitle:en:json3"),
+    )
+    # resolve_series should be called with explicit_series="Manual" and return manual
+    monkeypatch.setattr(
+        "clipvault.cli.resolve_series",
+        lambda library, *, platform, uploader, title, explicit_series: ("Manual", "manual"),
+    )
+
+    from clipvault.cli import process_video
+
+    result = process_video(
+        url="https://youtube.com/watch?v=vid2",
+        library=tmp_path,
+        model_name="tiny", device="cpu", compute_type="int8",
+        force=True, keep_audio=False, verbose=False,
+        series="Manual",
+    )
+    assert result["status"] == "ok"
+    assert result["series"] == "Manual"
+    assert result["series_source"] == "manual"
+    assert "Manual" in result["folder"]
+
+
+def test_process_video_no_series_no_rules(tmp_path: Path, monkeypatch):
+    """Without --series and no rules match, series is null."""
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        "clipvault.cli.extract_info",
+        lambda url, *, verbose: {"title": "Plain Video", "uploader": "U", "id": "vid3"},
+    )
+    monkeypatch.setattr(
+        "clipvault.cli.get_platform_subtitles",
+        lambda info, platform: ([SubtitleSegment(0.0, 1.0, "h")], "subtitle:en:json3"),
+    )
+    monkeypatch.setattr(
+        "clipvault.cli.resolve_series",
+        lambda library, *, platform, uploader, title, explicit_series: (None, None),
+    )
+
+    from clipvault.cli import process_video
+
+    result = process_video(
+        url="https://youtube.com/watch?v=vid3",
+        library=tmp_path,
+        model_name="tiny", device="cpu", compute_type="int8",
+        force=True, keep_audio=False, verbose=False,
+        series=None,
+    )
+    assert result["status"] == "ok"
+    assert result["series"] is None
+    assert result["series_source"] is None
+    # No series directory: video folder is directly under creator dir
+    assert Path(result["folder"]).parent.name == "U"
+
+
+def test_process_video_cache_hit_auto_series(tmp_path: Path, monkeypatch):
+    """Cache hit with auto-series still returns series info and updates indexes."""
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        "clipvault.cli.extract_info",
+        lambda url, *, verbose: {"title": "Cached Video", "uploader": "U", "id": "vid4"},
+    )
+    monkeypatch.setattr(
+        "clipvault.cli.get_platform_subtitles",
+        lambda info, platform: ([SubtitleSegment(0.0, 1.0, "h")], "subtitle:en:json3"),
+    )
+
+    auto_resolve = lambda library, *, platform, uploader, title, explicit_series: ("Auto Series", "rule")  # noqa: E731
+
+    from clipvault.cli import process_video
+
+    # First run creates cached entry with auto series
+    monkeypatch.setattr(
+        "clipvault.cli.resolve_series",
+        auto_resolve,
+    )
+    r1 = process_video(
+        url="https://youtube.com/watch?v=vid4",
+        library=tmp_path,
+        model_name="tiny", device="cpu", compute_type="int8",
+        force=True, keep_audio=False, verbose=False,
+        series=None,
+    )
+    assert r1["status"] == "ok"
+    assert r1["series"] == "Auto Series"
+
+    # Second run without --force — cache hit
+    r2 = process_video(
+        url="https://youtube.com/watch?v=vid4",
+        library=tmp_path,
+        model_name="tiny", device="cpu", compute_type="int8",
+        force=False, keep_audio=False, verbose=False,
+        series=None,
+    )
+    assert r2["status"] == "cached"
+    assert r2["series"] == "Auto Series"
+    assert r2["series_source"] == "rule"
+    # Indexes exist
+    c_path = tmp_path / "youtube" / "U" / "_index.json"
+    assert c_path.exists()
+    c_data = json.loads(c_path.read_text(encoding="utf-8"))
+    assert len(c_data["videos"]) == 1
+    assert c_data["videos"][0]["video_id"] == "vid4"

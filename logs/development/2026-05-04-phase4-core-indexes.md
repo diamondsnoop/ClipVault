@@ -74,7 +74,7 @@ Key design decisions:
 - **Relative paths**: Never absolute, so indexes survive library relocation.
 - **Blank series**: `normalize_series()` converts whitespace-only to `None`; no series index created.
 - **Cache hit**: Indexes are re-generated on cache hit, so pre-index caches get indexed on first access.
-- **Non-blocking**: Index update failures are silently caught; the pipeline result is unaffected.
+- **Non-blocking**: Index update failures are logged (not silently caught); the pipeline result is unaffected.
 
 ## Steps
 
@@ -115,7 +115,7 @@ Key design decisions:
 ## Verification
 
 ```
-pytest -q                              # 116 passed
+pytest -q                              # 116 passed (initial)
 clipvault --help                        # --series SERIES shown
 pip check                               # no broken deps
 compileall -q clipvault tests           # clean

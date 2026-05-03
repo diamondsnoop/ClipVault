@@ -112,6 +112,45 @@ Old `library/<creator>/<video title - id>/` folders remain readable for cache co
 .\clipvault.ps1 "https://www.bilibili.com/video/BV..." --model tiny
 ```
 
+## Auto Series Rules
+
+Without ``--series``, ClipVault can assign videos to a series automatically
+using local title-matching rules.
+
+Rules are stored per creator in:
+
+```text
+library/<platform>/<creator>/_series_rules.json
+```
+
+Format:
+
+```json
+{
+  "schema_version": 1,
+  "rules": [
+    {
+      "series": "睡前消息",
+      "title_contains": ["睡前消息"],
+      "title_regex": null
+    },
+    {
+      "series": "History of the Middle East",
+      "title_contains": ["History of the Middle East"],
+      "title_regex": null
+    }
+  ]
+}
+```
+
+- **``title_contains``**: any of these strings appears in the video title (case-sensitive).
+- **``title_regex``**: optional regex pattern matched via ``re.search``.
+- First matching rule wins (rules are evaluated in file order).
+- File must be created manually — no CLI management commands yet.
+- Manually passed ``--series`` always takes priority over auto-rules.
+- This is local title-based matching, not AI recognition and not creator
+  subscription.
+
 ## Repository Hygiene
 
 Do not commit generated data or local runtime folders:

@@ -14,7 +14,6 @@ from .library import (
     first_text,
     guess_platform,
     is_completed,
-    normalize_series,
     resolve_video_directory,
     update_library_indexes,
     update_manifest,
@@ -22,6 +21,7 @@ from .library import (
     write_json,
 )
 from .platforms import download_audio, extract_info
+from .series_rules import resolve_series
 from .subtitles import get_platform_subtitles
 
 
@@ -88,7 +88,6 @@ def process_video(
     if not shutil.which("ffmpeg"):
         raise RuntimeError("ffmpeg is not available in PATH.")
 
-    series = normalize_series(series)
     print(f"[pipeline] processing {url}", file=sys.stderr)
     info = extract_info(url, verbose=verbose)
     title = first_text(info, "title", default="untitled")
@@ -96,6 +95,11 @@ def process_video(
     video_id = first_text(info, "id", "display_id", default="unknown-id")
     platform = guess_platform(url)
     print(f"[platform] {platform}", file=sys.stderr)
+
+    # Resolve series: explicit --series takes priority, otherwise auto-rules
+    series, series_source = resolve_series(
+        library, platform=platform, uploader=uploader, title=title, explicit_series=series,
+    )
     if series:
         print(f"[library] series: {series}", file=sys.stderr)
 
@@ -118,6 +122,8 @@ def process_video(
             "uploader": uploader,
             "video_id": video_id,
             "platform": platform,
+            "series": series,
+            "series_source": series_source,
             "markdown": str(md_path) if md_path.exists() else None,
             "folder": str(video_dir),
         }
@@ -180,6 +186,8 @@ def process_video(
         "uploader": uploader,
         "video_id": video_id,
         "platform": platform,
+        "series": series,
+        "series_source": series_source,
         "segments": len(segments),
         "markdown": str(video_dir / "transcript.md"),
         "folder": str(video_dir),

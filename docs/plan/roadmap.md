@@ -186,24 +186,25 @@ Auto-maintained JSON indexes for library browsing:
 - **Creator index** at `library/<platform>/<creator>/_index.json` — lists all videos and aggregates known series.
 - **Series index** at `library/<platform>/<creator>/<series>/_index.json` — created only when `--series` was used.
 - Indexes are plain JSON, updated on both new processing and cache hits.
-- Videos deduplicated by `video_id`; sorted by `processed_at` descending.
+- Videos deduplicated by `video_id`; sorted by `processed_at` descending, title ascending.
 - Relative paths only, so indexes survive library relocation.
 
-Planned work (remaining):
+### Phase 4 Step 3 — Title-based Auto Series Rules (completed)
 
-- Add title-rule based auto-assignment later:
-  - keyword rules.
-  - regex rules.
-- Add creator-level index files:
-  - videos processed.
-  - known series.
-  - latest processed item.
-- Add basic import of historical transcript files only after current library schema is stable.
+Optional title-matching rules to auto-assign series when `--series` is not passed:
+
+- Rule file at `library/<platform>/<creator>/_series_rules.json` (per creator).
+- Supports `title_contains` (keyword list) and `title_regex` (optional regex).
+- First matching rule wins; rules evaluated in file order.
+- Explicit `--series` always takes priority over auto-rules.
+- Missing or invalid rule file is non-blocking (logged, not crashed).
+- Implemented in a new `clipvault/series_rules.py` module.
 
 Success criteria:
 
 - A user can group videos from the same creator into a named series. ✅
-- Future creator subscriptions can build on the same metadata. ✅ (index foundation)
+- Future creator subscriptions can build on the same metadata. ✅ (index foundation) ✅
+- Series can be auto-assigned by title pattern without requiring `--series`. ✅
 
 ## Phase 5: Creator Tracking and Batch Ingestion
 
@@ -262,4 +263,5 @@ These may be revisited only after the transcript vault itself is dependable.
 2. Define a small platform adapter interface before adding Douyin-specific logic.
 3. ~~Add manual `--series` support only after the platform/cache boundary is stable.~~ (done)
 4. ~~Add creator-level index design under `docs/plan/` before implementing subscriptions.~~ (done)
-5. Keep GUI and AI note generation out of scope until transcript acquisition is dependable.
+5. ~~Add title-based auto series rules.~~ (done)
+6. Keep GUI and AI note generation out of scope until transcript acquisition is dependable.

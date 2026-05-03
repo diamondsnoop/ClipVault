@@ -39,6 +39,15 @@ Manual series grouping:
 - Manifest includes `"series": "Series Name"`.
 - This is manual assignment only; no auto-detection, no creator subscriptions.
 
+Auto series rules (Phase 4 Step 3):
+
+- Without `--series`, ClipVault reads `library/<platform>/<creator>/_series_rules.json`.
+- Title-based matching via `title_contains` (keyword list) or `title_regex`.
+- First matching rule wins; rules evaluated in file order.
+- Explicit `--series` always takes priority over auto-rules.
+- Rule file must be created manually; no CLI management commands yet.
+- This is local title matching, not AI recognition or creator subscription.
+
 Library indexes (auto-maintained):
 
 - `library/<platform>/<creator>/_index.json` — creator index with all videos and series aggregation.
@@ -50,7 +59,7 @@ Not yet implemented:
 
 - GUI.
 - YouTube/Douyin-specific polish beyond the generic `yt-dlp` path.
-- Automatic series detection.
+- Rule management CLI commands.
 - Creator subscriptions.
 - Database/indexing.
 - AI summary or note generation.
@@ -62,6 +71,7 @@ Not yet implemented:
 - `clipvault/subtitles.py`: Subtitle track selection, download, and parsing.
 - `clipvault/asr.py`: `faster-whisper`, CUDA/CPU selection, local model resolution.
 - `clipvault/library.py`: File naming, manifest creation, library path helpers.
+- `clipvault/series_rules.py`: Title-based auto series rule matching.
 - `clipvault/exporters.py`: `srt`, `txt`, and `md` output generation.
 - `clipvault/models.py`: Shared dataclasses.
 - `clipvault/text.py`: Text cleanup helpers.
@@ -244,6 +254,7 @@ Recommended next steps:
 
 1. Harden Bilibili behavior with focused real-link regression cases.
 2. Add explicit platform abstraction boundaries before adding more platforms.
-3. Add series assignment later, starting with manual `--series`.
-4. Add creator-level indexes after the manifest shape is stable.
-5. Keep GUI and AI features out of scope until transcript acquisition and library maintenance are dependable.
+3. ~~Add series assignment, starting with manual `--series`.~~ (done)
+4. ~~Add creator-level indexes after the manifest shape is stable.~~ (done)
+5. ~~Add title-based auto series rules.~~ (done)
+6. Keep GUI and AI features out of scope until transcript acquisition and library maintenance are dependable.
