@@ -12,8 +12,12 @@ from .platforms import identify_platform
 SCHEMA_VERSION = 1
 
 
-def video_directory(library: Path, *, platform: str, uploader: str, title: str, video_id: str) -> Path:
-    return library / safe_name(platform) / safe_name(uploader) / safe_name(f"{title} - {video_id}")
+def video_directory(library: Path, *, platform: str, uploader: str, title: str, video_id: str, series: str | None = None) -> Path:
+    parts = [library, safe_name(platform), safe_name(uploader)]
+    if series:
+        parts.append(safe_name(series))
+    parts.append(safe_name(f"{title} - {video_id}"))
+    return Path(*parts)
 
 
 def legacy_video_directory(library: Path, *, uploader: str, title: str, video_id: str) -> Path:
@@ -47,9 +51,14 @@ def resolve_video_directory(
     uploader: str,
     title: str,
     video_id: str,
+    series: str | None = None,
 ) -> Path:
-    """Resolve the video directory: prefer new platform-aware path,
-    fall back to legacy path for backward compatibility."""
+    """Resolve the video directory: prefer series path if requested,
+    then new platform-aware path, then legacy path."""
+    if series:
+        series_dir = video_directory(library, platform=platform, uploader=uploader, title=title, video_id=video_id, series=series)
+        # When series is requested, never fall back to a non-series path.
+        return series_dir
     new_dir = video_directory(library, platform=platform, uploader=uploader, title=title, video_id=video_id)
     if is_completed(new_dir):
         return new_dir
@@ -66,6 +75,7 @@ def build_manifest(
     title: str,
     uploader: str,
     video_id: str,
+    series: str | None = None,
 ) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
@@ -75,6 +85,7 @@ def build_manifest(
         "source_url": url,
         "webpage_url": info.get("webpage_url"),
         "platform": guess_platform(url),
+        "series": series,
         "duration": info.get("duration"),
         "upload_date": info.get("upload_date"),
         "description": info.get("description"),

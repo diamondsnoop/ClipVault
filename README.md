@@ -78,7 +78,12 @@ library/
         transcript.txt
         transcript.md
         source_audio.m4a        # kept only when --keep-audio is used
+      Series Name/
+        Video Title - BVxxxx/
+          ...
 ```
+
+With `--series`, the path becomes `library/<platform>/<creator>/<series>/<video title - id>/`.
 
 Old `library/<creator>/<video title - id>/` folders remain readable for cache compatibility when their manifest and output files are complete.
 
@@ -90,6 +95,9 @@ Old `library/<creator>/<video title - id>/` folders remain readable for cache co
 
 # Use a custom library root
 .\clipvault.ps1 "https://www.bilibili.com/video/BV..." --library "E:\VideoSubs"
+
+# Assign a video to a series (groups videos under a series folder)
+.\clipvault.ps1 "https://www.bilibili.com/video/BV..." --series "睡前消息"
 
 # Use a smaller ASR model
 .\clipvault.ps1 "https://www.bilibili.com/video/BV..." --model tiny

@@ -44,6 +44,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--force", action="store_true", help="Re-fetch even if transcript exists.")
     parser.add_argument("--keep-audio", action="store_true", help="Keep downloaded audio after ASR.")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show yt-dlp logs.")
+    parser.add_argument(
+        "--series",
+        type=str,
+        default=None,
+        help="Optional series name for library grouping.",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -56,6 +62,7 @@ def main(argv: list[str] | None = None) -> None:
             force=args.force,
             keep_audio=args.keep_audio,
             verbose=args.verbose,
+            series=args.series,
         )
     except Exception as exc:  # noqa: BLE001 - CLI should report cleanly
         print(f"[error] {exc}", file=sys.stderr)
@@ -74,6 +81,7 @@ def process_video(
     force: bool,
     keep_audio: bool,
     verbose: bool,
+    series: str | None = None,
 ) -> dict[str, Any]:
     if not shutil.which("ffmpeg"):
         raise RuntimeError("ffmpeg is not available in PATH.")
@@ -85,10 +93,12 @@ def process_video(
     video_id = first_text(info, "id", "display_id", default="unknown-id")
     platform = guess_platform(url)
     print(f"[platform] {platform}", file=sys.stderr)
+    if series:
+        print(f"[library] series: {series}", file=sys.stderr)
 
     # Check cache (handles both new platform-aware and legacy paths)
     video_dir = resolve_video_directory(
-        library, platform=platform, uploader=uploader, title=title, video_id=video_id,
+        library, platform=platform, uploader=uploader, title=title, video_id=video_id, series=series,
     )
     if is_completed(video_dir) and not force:
         md_path = video_dir / "transcript.md"
@@ -104,10 +114,10 @@ def process_video(
         }
 
     # New processing always uses platform-aware path
-    video_dir = video_directory(library, platform=platform, uploader=uploader, title=title, video_id=video_id)
+    video_dir = video_directory(library, platform=platform, uploader=uploader, title=title, video_id=video_id, series=series)
     video_dir.mkdir(parents=True, exist_ok=True)
 
-    manifest = build_manifest(info, url=url, title=title, uploader=uploader, video_id=video_id)
+    manifest = build_manifest(info, url=url, title=title, uploader=uploader, video_id=video_id, series=series)
     write_json(video_dir / "manifest.json", manifest)
 
     segments, source = get_platform_subtitles(info, platform=platform)

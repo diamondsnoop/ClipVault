@@ -169,12 +169,18 @@ Success criteria:
 
 Goal: support long-term maintenance around creators and recurring series.
 
-Planned work:
+### Phase 4 Step 1 — Manual Series Assignment (completed)
 
-- Add manual series assignment:
-  - `--series "Series Name"`.
-- Library path with series:
-  - `library/<platform>/<creator>/<series>/<video title - id>/`
+Added `--series "Series Name"` CLI parameter. The library path with series:
+
+```text
+library/<platform>/<creator>/<series>/<video title - id>/
+```
+
+Manifest includes `"series": "Series Name"` when assigned. Cache boundary is strict: a `--series` run will never hit a non-series cache entry.
+
+Planned work (remaining):
+
 - Add title-rule based auto-assignment later:
   - keyword rules.
   - regex rules.
@@ -186,7 +192,7 @@ Planned work:
 
 Success criteria:
 
-- A user can group videos from the same creator into a named series.
+- A user can group videos from the same creator into a named series. ✅
 - Future creator subscriptions can build on the same metadata.
 
 ## Phase 5: Creator Tracking and Batch Ingestion
@@ -244,6 +250,6 @@ These may be revisited only after the transcript vault itself is dependable.
 
 1. Add focused Bilibili hardening tests and real-link regression notes.
 2. Define a small platform adapter interface before adding Douyin-specific logic.
-3. Add manual `--series` support only after the platform/cache boundary is stable.
+3. ~~Add manual `--series` support only after the platform/cache boundary is stable.~~ (done)
 4. Add creator-level index design under `docs/plan/` before implementing subscriptions.
 5. Keep GUI and AI note generation out of scope until transcript acquisition is dependable.

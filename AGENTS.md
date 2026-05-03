@@ -32,11 +32,18 @@ Implemented:
 - Legacy cache compatibility for complete old folders:
   - `library/<creator>/<video title - id>/`
 
+Manual series grouping:
+
+- `--series "Series Name"` assigns a video to a series folder.
+- Path: `library/<platform>/<creator>/<series>/<video title - id>/`.
+- Manifest includes `"series": "Series Name"`.
+- This is manual assignment only; no auto-detection, no creator subscriptions.
+
 Not yet implemented:
 
 - GUI.
 - YouTube/Douyin-specific polish beyond the generic `yt-dlp` path.
-- Series management.
+- Automatic series detection.
 - Creator subscriptions.
 - Database/indexing.
 - AI summary or note generation.
@@ -93,6 +100,12 @@ Force reprocessing:
 
 ```powershell
 .\clipvault.ps1 "https://www.bilibili.com/video/BV..." --force
+```
+
+Group into a series:
+
+```powershell
+.\clipvault.ps1 "https://www.bilibili.com/video/BV..." --series "睡前消息"
 ```
 
 Force CPU:

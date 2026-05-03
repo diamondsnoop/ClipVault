@@ -143,6 +143,16 @@ def test_build_manifest_nullable_fields():
     assert manifest["output_files"] == []
 
 
+def test_build_manifest_series():
+    manifest = build_manifest({}, url="https://example.com", title="T", uploader="U", video_id="V", series="睡前消息")
+    assert manifest["series"] == "睡前消息"
+
+
+def test_build_manifest_series_none():
+    manifest = build_manifest({}, url="https://example.com", title="T", uploader="U", video_id="V")
+    assert manifest["series"] is None
+
+
 # --- video_directory ---
 
 
@@ -155,6 +165,25 @@ def test_video_directory_sanitizes_names():
     path = video_directory(Path("/lib"), platform="youtube", uploader="Bad:Name", title="File/Path", video_id="x")
     assert "Bad_Name" in str(path)
     assert "File_Path" in str(path)
+
+
+def test_video_directory_with_series():
+    path = video_directory(Path("/lib"), platform="bilibili", uploader="Creator", title="Title", video_id="BV1", series="睡前消息")
+    assert path == Path("/lib/bilibili/Creator/睡前消息/Title - BV1")
+
+
+def test_video_directory_series_sanitized():
+    path = video_directory(Path("/lib"), platform="bilibili", uploader="Creator", title="Title", video_id="BV1", series="A/B: C")
+    assert "A_B_ C" in str(path)
+    assert "/lib/bilibili/Creator/A_B_ C/Title - BV1" in str(path).replace("\\", "/")
+
+
+def test_video_directory_series_none_is_unchanged():
+    """Explicit series=None produces same path as omitting series."""
+    with_series = video_directory(Path("/lib"), platform="bilibili", uploader="Creator", title="Title", video_id="BV1", series=None)
+    without = video_directory(Path("/lib"), platform="bilibili", uploader="Creator", title="Title", video_id="BV1")
+    assert with_series == without
+    assert with_series == Path("/lib/bilibili/Creator/Title - BV1")
 
 
 # --- legacy_video_directory ---
@@ -287,3 +316,49 @@ def test_resolve_returns_new_path_when_no_cache(tmp_path: Path):
     result = resolve_video_directory(tmp_path, platform="bilibili", uploader="U", title="T", video_id="V1")
     expected = video_directory(tmp_path, platform="bilibili", uploader="U", title="T", video_id="V1")
     assert result == expected
+
+
+# --- resolve_video_directory with series ---
+
+
+def test_resolve_with_series_returns_series_path(tmp_path: Path):
+    """When series is provided, return series path (even if non-series cache exists)."""
+    # Create a completed non-series path
+    non_series = video_directory(tmp_path, platform="bilibili", uploader="U", title="T", video_id="V1")
+    non_series.mkdir(parents=True)
+    write_json(non_series / "manifest.json", {"subtitle_source": "subtitle:en:json3"})
+    (non_series / "transcript.srt").write_text("", encoding="utf-8")
+    (non_series / "transcript.txt").write_text("", encoding="utf-8")
+    (non_series / "transcript.md").write_text("", encoding="utf-8")
+
+    # Series is requested but no series cache exists — must NOT return non-series path
+    result = resolve_video_directory(tmp_path, platform="bilibili", uploader="U", title="T", video_id="V1", series="睡前消息")
+    expected = video_directory(tmp_path, platform="bilibili", uploader="U", title="T", video_id="V1", series="睡前消息")
+    assert result == expected
+    assert result != non_series
+
+
+def test_resolve_with_series_hits_series_cache(tmp_path: Path):
+    """When series path has a completed manifest, return it."""
+    series_dir = video_directory(tmp_path, platform="bilibili", uploader="U", title="T", video_id="V1", series="睡前消息")
+    series_dir.mkdir(parents=True)
+    write_json(series_dir / "manifest.json", {"subtitle_source": "subtitle:en:json3"})
+    (series_dir / "transcript.srt").write_text("", encoding="utf-8")
+    (series_dir / "transcript.txt").write_text("", encoding="utf-8")
+    (series_dir / "transcript.md").write_text("", encoding="utf-8")
+
+    result = resolve_video_directory(tmp_path, platform="bilibili", uploader="U", title="T", video_id="V1", series="睡前消息")
+    assert result == series_dir
+
+
+def test_resolve_no_series_still_hits_non_series_cache(tmp_path: Path):
+    """Without series, existing non-series cache is still hit normally."""
+    new_dir = video_directory(tmp_path, platform="bilibili", uploader="U", title="T", video_id="V1")
+    new_dir.mkdir(parents=True)
+    write_json(new_dir / "manifest.json", {"subtitle_source": "subtitle:en:json3"})
+    (new_dir / "transcript.srt").write_text("", encoding="utf-8")
+    (new_dir / "transcript.txt").write_text("", encoding="utf-8")
+    (new_dir / "transcript.md").write_text("", encoding="utf-8")
+
+    result = resolve_video_directory(tmp_path, platform="bilibili", uploader="U", title="T", video_id="V1")
+    assert result == new_dir
