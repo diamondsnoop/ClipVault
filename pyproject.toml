@@ -1,0 +1,22 @@
+[project]
+name = "clipvault"
+version = "0.1.0"
+description = "Local-first video transcript vault with subtitle extraction and ASR fallback."
+requires-python = ">=3.10"
+dependencies = [
+  "yt-dlp>=2026.3.17",
+  "faster-whisper>=1.2.1",
+]
+
+[project.optional-dependencies]
+windows-nvidia = [
+  "nvidia-cublas-cu12>=12.9.2.10",
+  "nvidia-cuda-nvrtc-cu12>=12.9.86",
+]
+
+[project.scripts]
+clipvault = "clipvault.cli:main"
+
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
