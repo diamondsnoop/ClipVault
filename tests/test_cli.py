@@ -98,3 +98,56 @@ def test_process_video_without_series(tmp_path: Path, monkeypatch):
     assert manifest["series"] is None
     # Path should NOT contain a series segment
     assert "Test Series" not in result["folder"]
+
+
+def test_process_video_stripped_series(tmp_path: Path, monkeypatch):
+    """series=' Test Series ' is stripped, path uses 'Test Series', manifest writes 'Test Series'."""
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        "clipvault.cli.extract_info",
+        lambda url, *, verbose: {"title": "T", "uploader": "U", "id": "id1"},
+    )
+    monkeypatch.setattr(
+        "clipvault.cli.get_platform_subtitles",
+        lambda info, platform: ([SubtitleSegment(0.0, 1.0, "h")], "subtitle:en:json3"),
+    )
+
+    from clipvault.cli import process_video
+
+    result = process_video(
+        url="https://youtube.com/watch?v=id1",
+        library=tmp_path,
+        model_name="tiny", device="cpu", compute_type="int8",
+        force=True, keep_audio=False, verbose=False,
+        series="  Test Series  ",
+    )
+    assert "Test Series" in result["folder"]
+    manifest = json.loads((Path(result["folder"]) / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["series"] == "Test Series"
+
+
+def test_process_video_blank_series_equals_no_series(tmp_path: Path, monkeypatch):
+    """series='   ' creates no series dir and manifest series is None."""
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        "clipvault.cli.extract_info",
+        lambda url, *, verbose: {"title": "T", "uploader": "U", "id": "id2"},
+    )
+    monkeypatch.setattr(
+        "clipvault.cli.get_platform_subtitles",
+        lambda info, platform: ([SubtitleSegment(0.0, 1.0, "h")], "subtitle:en:json3"),
+    )
+
+    from clipvault.cli import process_video
+
+    result = process_video(
+        url="https://youtube.com/watch?v=id2",
+        library=tmp_path,
+        model_name="tiny", device="cpu", compute_type="int8",
+        force=True, keep_audio=False, verbose=False,
+        series="   ",
+    )
+    # No untitled series directory
+    assert "untitled" not in result["folder"]
+    manifest = json.loads((Path(result["folder"]) / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["series"] is None

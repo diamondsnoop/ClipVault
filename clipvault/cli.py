@@ -14,6 +14,7 @@ from .library import (
     first_text,
     guess_platform,
     is_completed,
+    normalize_series,
     resolve_video_directory,
     update_manifest,
     video_directory,
@@ -86,6 +87,7 @@ def process_video(
     if not shutil.which("ffmpeg"):
         raise RuntimeError("ffmpeg is not available in PATH.")
 
+    series = normalize_series(series)
     print(f"[pipeline] processing {url}", file=sys.stderr)
     info = extract_info(url, verbose=verbose)
     title = first_text(info, "title", default="untitled")

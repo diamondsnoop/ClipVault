@@ -40,12 +40,36 @@ no auto-detection, no creator subscriptions.
    - Boundary verified: same URL without `--series` did NOT hit the series cache
      (reprocessed to `library/youtube/jawed/...`).
 
+### Review Fix — Blank Series Normalization
+
+**Problem:** Passing `--series "   "` (whitespace-only) created an `untitled`
+series directory and wrote a blank string into the manifest, causing path and
+metadata inconsistency.
+
+**Fix:**
+1. Added `normalize_series(series)` in `library.py` — returns `None` for
+   `None`, empty, or whitespace-only input; strips leading/trailing whitespace
+   otherwise.
+2. `process_video()` calls `normalize_series()` once at the top so all
+   downstream functions receive the normalized value.
+3. `video_directory()` and `build_manifest()` also call `normalize_series()`
+   internally as a safety net for direct callers.
+4. Whitespace-only series now behaves identically to no series: no series
+   directory, `"series": null` in manifest, no `[library] series:` log.
+
+**Tests added** (8 new, 103 total):
+- `test_normalize_series_none`, `test_normalize_series_empty`,
+  `test_normalize_series_whitespace`, `test_normalize_series_strips`
+- `test_video_directory_blank_series_equals_no_series`
+- `test_build_manifest_blank_series_is_none`
+- `test_process_video_stripped_series`, `test_process_video_blank_series_equals_no_series`
+
 ## Changes
 
 - `clipvault/library.py` — series parameter in 3 functions
 - `clipvault/cli.py` — `--series` arg, pipeline integration, log
-- `tests/test_library.py` — 8 new series tests
-- `tests/test_cli.py` — 2 new integration tests (mocked)
+- `tests/test_library.py` — 12 new series tests
+- `tests/test_cli.py` — 4 new integration tests (mocked)
 - `README.md` — series in output layout and examples
 - `AGENTS.md` — series in capabilities and commands
 - `docs/plan/roadmap.md` — Phase 4 Step 1 marked done
@@ -53,7 +77,7 @@ no auto-detection, no creator subscriptions.
 ## Verification
 
 ```
-pytest -q                              # 95 passed
+pytest -q                              # 103 passed
 clipvault --help                        # --series SERIES shown
 pip check                               # no broken deps
 compileall -q clipvault tests           # clean

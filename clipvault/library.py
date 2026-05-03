@@ -13,6 +13,7 @@ SCHEMA_VERSION = 1
 
 
 def video_directory(library: Path, *, platform: str, uploader: str, title: str, video_id: str, series: str | None = None) -> Path:
+    series = normalize_series(series)
     parts = [library, safe_name(platform), safe_name(uploader)]
     if series:
         parts.append(safe_name(series))
@@ -85,7 +86,7 @@ def build_manifest(
         "source_url": url,
         "webpage_url": info.get("webpage_url"),
         "platform": guess_platform(url),
-        "series": series,
+        "series": normalize_series(series),
         "duration": info.get("duration"),
         "upload_date": info.get("upload_date"),
         "description": info.get("description"),
@@ -124,6 +125,18 @@ def first_text(data: dict[str, Any], *keys: str, default: str) -> str:
         if value is not None and str(value).strip():
             return str(value).strip()
     return default
+
+
+def normalize_series(series: str | None) -> str | None:
+    """Normalize a user-provided series name.
+
+    * ``None``, empty, or whitespace-only → ``None``.
+    * Otherwise → stripped of leading/trailing whitespace.
+    """
+    if series is None:
+        return None
+    stripped = series.strip()
+    return stripped if stripped else None
 
 
 def safe_name(value: str, *, max_length: int = 120) -> str:

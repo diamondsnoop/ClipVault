@@ -9,6 +9,7 @@ from clipvault.library import (
     guess_platform,
     is_completed,
     legacy_video_directory,
+    normalize_series,
     resolve_video_directory,
     safe_name,
     update_manifest,
@@ -72,6 +73,27 @@ def test_safe_name_empty_fallback():
 def test_safe_name_truncates():
     long = "a" * 200
     assert len(safe_name(long)) <= 120
+
+
+# --- normalize_series ---
+
+
+def test_normalize_series_none():
+    assert normalize_series(None) is None
+
+
+def test_normalize_series_empty():
+    assert normalize_series("") is None
+
+
+def test_normalize_series_whitespace():
+    assert normalize_series("   ") is None
+    assert normalize_series("\t\n") is None
+
+
+def test_normalize_series_strips():
+    assert normalize_series(" 睡前消息 ") == "睡前消息"
+    assert normalize_series("  Series Name  ") == "Series Name"
 
 
 # --- first_text ---
@@ -153,6 +175,12 @@ def test_build_manifest_series_none():
     assert manifest["series"] is None
 
 
+def test_build_manifest_blank_series_is_none():
+    """Blank series in build_manifest is stored as None (normalized before call)."""
+    manifest = build_manifest({}, url="https://example.com", title="T", uploader="U", video_id="V", series="   ")
+    assert manifest["series"] is None
+
+
 # --- video_directory ---
 
 
@@ -184,6 +212,14 @@ def test_video_directory_series_none_is_unchanged():
     without = video_directory(Path("/lib"), platform="bilibili", uploader="Creator", title="Title", video_id="BV1")
     assert with_series == without
     assert with_series == Path("/lib/bilibili/Creator/Title - BV1")
+
+
+def test_video_directory_blank_series_equals_no_series():
+    """Blank series should not create an 'untitled' series directory."""
+    blank = video_directory(Path("/lib"), platform="bilibili", uploader="Creator", title="Title", video_id="BV1", series="   ")
+    no_series = video_directory(Path("/lib"), platform="bilibili", uploader="Creator", title="Title", video_id="BV1")
+    assert blank == no_series
+    assert "untitled" not in str(blank)
 
 
 # --- legacy_video_directory ---
