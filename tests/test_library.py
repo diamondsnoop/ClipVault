@@ -5,6 +5,7 @@ from pathlib import Path
 
 from clipvault.library import (
     build_manifest,
+    creator_index_path,
     first_text,
     guess_platform,
     is_completed,
@@ -12,6 +13,8 @@ from clipvault.library import (
     normalize_series,
     resolve_video_directory,
     safe_name,
+    series_index_path,
+    update_library_indexes,
     update_manifest,
     video_directory,
     write_json,
@@ -398,3 +401,285 @@ def test_resolve_no_series_still_hits_non_series_cache(tmp_path: Path):
 
     result = resolve_video_directory(tmp_path, platform="bilibili", uploader="U", title="T", video_id="V1")
     assert result == new_dir
+
+
+# ── Index path helpers ───────────────────────────────────────────────
+
+
+def test_creator_index_path():
+    path = creator_index_path(Path("/lib"), platform="youtube", uploader="Jabzy")
+    assert path == Path("/lib/youtube/Jabzy/_index.json")
+
+
+def test_series_index_path():
+    path = series_index_path(Path("/lib"), platform="youtube", uploader="Jabzy", series="History of the Middle East")
+    assert path == Path("/lib/youtube/Jabzy/History of the Middle East/_index.json")
+
+
+def test_series_index_path_none():
+    assert series_index_path(Path("/lib"), platform="youtube", uploader="Jabzy", series=None) is None
+    assert series_index_path(Path("/lib"), platform="youtube", uploader="Jabzy", series="   ") is None
+
+
+# ── update_library_indexes: creator index ────────────────────────────
+
+
+def _make_manifest(*, video_id: str, title: str, uploader: str = "U", platform: str = "youtube", series: str | None = None, **kw: str) -> dict:
+    from datetime import datetime, timezone
+    m = {
+        "schema_version": 1,
+        "title": title,
+        "uploader": uploader,
+        "video_id": video_id,
+        "source_url": f"https://youtube.com/watch?v={video_id}",
+        "webpage_url": f"https://youtube.com/watch?v={video_id}",
+        "platform": platform,
+        "series": normalize_series(series),
+        "duration": 120,
+        "upload_date": "20260101",
+        "description": "",
+        "creator_id": "UCtest",
+        "processed_at": datetime.now(timezone.utc).isoformat(),
+        "subtitle_source": "subtitle:en:json3",
+        "asr_model": None,
+        "asr_device": None,
+        "output_files": ["transcript.srt", "transcript.txt", "transcript.md"],
+    }
+    m.update(kw)
+    return m
+
+
+def test_creator_index_created_no_series(tmp_path: Path):
+    """A video without series creates a creator _index.json."""
+    video_dir = video_directory(tmp_path, platform="youtube", uploader="Jabzy", title="Video One", video_id="v1")
+    video_dir.mkdir(parents=True)
+    manifest = _make_manifest(video_id="v1", title="Video One", uploader="Jabzy", series=None)
+    update_library_indexes(video_dir, manifest, tmp_path)
+
+    c_path = creator_index_path(tmp_path, platform="youtube", uploader="Jabzy")
+    assert c_path.exists()
+
+    data = json.loads(c_path.read_text(encoding="utf-8"))
+    assert data["type"] == "creator"
+    assert data["creator"] == "Jabzy"
+    assert len(data["videos"]) == 1
+    assert data["videos"][0]["video_id"] == "v1"
+    assert data["videos"][0]["series"] is None
+    # relative_path is just the folder name for non-series
+    assert "/" not in data["videos"][0]["relative_path"]
+
+
+def test_creator_index_with_series(tmp_path: Path):
+    """A video with series creates a creator index with series info."""
+    video_dir = video_directory(tmp_path, platform="youtube", uploader="Jabzy", title="Video Two", video_id="v2", series="睡前消息")
+    video_dir.mkdir(parents=True)
+    manifest = _make_manifest(video_id="v2", title="Video Two", uploader="Jabzy", series="睡前消息")
+    update_library_indexes(video_dir, manifest, tmp_path)
+
+    c_path = creator_index_path(tmp_path, platform="youtube", uploader="Jabzy")
+    data = json.loads(c_path.read_text(encoding="utf-8"))
+
+    assert len(data["videos"]) == 1
+    assert data["videos"][0]["video_id"] == "v2"
+    assert data["videos"][0]["series"] == "睡前消息"
+    # relative_path contains series folder
+    assert "睡前消息" in data["videos"][0]["relative_path"]
+
+    # Series aggregation is populated
+    assert len(data["series"]) == 1
+    assert data["series"][0]["name"] == "睡前消息"
+    assert data["series"][0]["video_count"] == 1
+
+
+def test_creator_index_dedup(tmp_path: Path):
+    """Re-processing same video_id overwrites, does not append."""
+    video_dir = video_directory(tmp_path, platform="youtube", uploader="U", title="Original", video_id="v1")
+    video_dir.mkdir(parents=True)
+    m1 = _make_manifest(video_id="v1", title="Original", uploader="U")
+    update_library_indexes(video_dir, m1, tmp_path)
+
+    # "Re-process": same video_id, different title
+    m2 = _make_manifest(video_id="v1", title="Updated", uploader="U")
+    update_library_indexes(video_dir, m2, tmp_path)
+
+    c_path = creator_index_path(tmp_path, platform="youtube", uploader="U")
+    data = json.loads(c_path.read_text(encoding="utf-8"))
+    assert len(data["videos"]) == 1  # not 2
+    assert data["videos"][0]["title"] == "Updated"
+
+
+def test_creator_index_no_absolute_path(tmp_path: Path):
+    """relative_path in creator index must not be an absolute path."""
+    video_dir = video_directory(tmp_path, platform="youtube", uploader="Jabzy", title="Video", video_id="v1")
+    video_dir.mkdir(parents=True)
+    manifest = _make_manifest(video_id="v1", title="Video", uploader="Jabzy", series="Series")
+    update_library_indexes(video_dir, manifest, tmp_path)
+
+    c_path = creator_index_path(tmp_path, platform="youtube", uploader="Jabzy")
+    data = json.loads(c_path.read_text(encoding="utf-8"))
+    for v in data["videos"]:
+        assert not Path(v["relative_path"]).is_absolute()
+
+
+# ── update_library_indexes: series index ─────────────────────────────
+
+
+def test_series_index_created(tmp_path: Path):
+    """video with series creates series _index.json."""
+    video_dir = video_directory(tmp_path, platform="youtube", uploader="Jabzy", title="Video", video_id="v1", series="Series")
+    video_dir.mkdir(parents=True)
+    manifest = _make_manifest(video_id="v1", title="Video", uploader="Jabzy", series="Series")
+    update_library_indexes(video_dir, manifest, tmp_path)
+
+    s_path = series_index_path(tmp_path, platform="youtube", uploader="Jabzy", series="Series")
+    assert s_path is not None
+    assert s_path.exists()
+
+    data = json.loads(s_path.read_text(encoding="utf-8"))
+    assert data["type"] == "series"
+    assert data["series"] == "Series"
+    assert data["video_count"] == 1
+    assert len(data["videos"]) == 1
+    assert data["videos"][0]["video_id"] == "v1"
+    # Series index relative_path is just the video folder, no series prefix
+    assert "/" not in data["videos"][0]["relative_path"]
+
+
+def test_series_index_not_created_without_series(tmp_path: Path):
+    """No series → no series _index.json."""
+    video_dir = video_directory(tmp_path, platform="youtube", uploader="Jabzy", title="Video", video_id="v1")
+    video_dir.mkdir(parents=True)
+    manifest = _make_manifest(video_id="v1", title="Video", uploader="Jabzy", series=None)
+    update_library_indexes(video_dir, manifest, tmp_path)
+
+    s_path = series_index_path(tmp_path, platform="youtube", uploader="Jabzy", series="Any")
+    if s_path is not None:
+        assert not s_path.exists()
+
+
+def test_series_index_blank_series_no_index(tmp_path: Path):
+    """--series '   ' is treated as no series, no series index created."""
+    video_dir = video_directory(tmp_path, platform="youtube", uploader="Jabzy", title="Video", video_id="v1")
+    video_dir.mkdir(parents=True)
+    manifest = _make_manifest(video_id="v1", title="Video", uploader="Jabzy", series="   ")
+    update_library_indexes(video_dir, manifest, tmp_path)
+
+    s_path = series_index_path(tmp_path, platform="youtube", uploader="Jabzy", series="   ")
+    assert s_path is None
+
+
+def test_series_index_video_count(tmp_path: Path):
+    """Multiple videos in same series increments video_count."""
+    for vid, title in [("v1", "Alpha"), ("v2", "Beta")]:
+        video_dir = video_directory(tmp_path, platform="youtube", uploader="U", title=title, video_id=vid, series="Series")
+        video_dir.mkdir(parents=True)
+        manifest = _make_manifest(video_id=vid, title=title, uploader="U", series="Series")
+        update_library_indexes(video_dir, manifest, tmp_path)
+
+    s_path = series_index_path(tmp_path, platform="youtube", uploader="U", series="Series")
+    assert s_path is not None
+    data = json.loads(s_path.read_text(encoding="utf-8"))
+    assert data["video_count"] == 2
+    assert len(data["videos"]) == 2
+
+
+def test_series_index_stripped_series(tmp_path: Path):
+    """--series '  Test Series  ' writes 'Test Series' to index."""
+    video_dir = video_directory(tmp_path, platform="youtube", uploader="U", title="Video", video_id="v1", series="  Test Series  ")
+    video_dir.mkdir(parents=True)
+    manifest = _make_manifest(video_id="v1", title="Video", uploader="U", series="  Test Series  ")
+    update_library_indexes(video_dir, manifest, tmp_path)
+
+    # Creator index should show normalized name
+    c_path = creator_index_path(tmp_path, platform="youtube", uploader="U")
+    c_data = json.loads(c_path.read_text(encoding="utf-8"))
+    assert c_data["videos"][0]["series"] == "Test Series"
+
+    # Series index should be at safe_name path with normalized name
+    s_path = series_index_path(tmp_path, platform="youtube", uploader="U", series="Test Series")
+    assert s_path is not None
+    assert s_path.exists()
+    s_data = json.loads(s_path.read_text(encoding="utf-8"))
+    assert s_data["series"] == "Test Series"
+
+
+# ── Creator index: series aggregation (no null) ────────────────────────
+
+
+def test_creator_index_no_series_agg_empty(tmp_path: Path):
+    """No-series video: series aggregation is empty, video entry has series: null."""
+    video_dir = video_directory(tmp_path, platform="youtube", uploader="U", title="Video", video_id="v1")
+    video_dir.mkdir(parents=True)
+    manifest = _make_manifest(video_id="v1", title="Video", uploader="U", series=None)
+    update_library_indexes(video_dir, manifest, tmp_path)
+
+    c_path = creator_index_path(tmp_path, platform="youtube", uploader="U")
+    data = json.loads(c_path.read_text(encoding="utf-8"))
+    assert data["videos"][0]["series"] is None
+    assert data["series"] == []
+
+
+def test_creator_index_mixed_series_agg(tmp_path: Path):
+    """Mix of series and no-series videos: only named series appear in aggregation."""
+    for vid, title, series in [("v1", "Alpha", "S1"), ("v2", "Beta", None), ("v3", "Gamma", "S2")]:
+        video_dir = video_directory(tmp_path, platform="youtube", uploader="U", title=title, video_id=vid, series=series)
+        video_dir.mkdir(parents=True)
+        manifest = _make_manifest(video_id=vid, title=title, uploader="U", series=series)
+        update_library_indexes(video_dir, manifest, tmp_path)
+
+    c_path = creator_index_path(tmp_path, platform="youtube", uploader="U")
+    data = json.loads(c_path.read_text(encoding="utf-8"))
+
+    # All 3 videos present
+    assert len(data["videos"]) == 3
+    # v2 has no series
+    v2 = [v for v in data["videos"] if v["video_id"] == "v2"][0]
+    assert v2["series"] is None
+    # Series list only contains S1 and S2 (not null)
+    names = {s["name"] for s in data["series"]}
+    assert names == {"S1", "S2"}
+    assert len(data["series"]) == 2
+
+
+# ── Index sort order ────────────────────────────────────────────────────
+
+
+def test_creator_index_sort_order(tmp_path: Path):
+    """Sort: processed_at descending, then title ascending for same date."""
+    for vid, title, date in [
+        ("v1", "Zeta", "20260101"),
+        ("v2", "Alpha", "20260101"),
+        ("v3", "Beta", "20260102"),
+    ]:
+        video_dir = video_directory(tmp_path, platform="youtube", uploader="U", title=title, video_id=vid)
+        video_dir.mkdir(parents=True)
+        manifest = _make_manifest(video_id=vid, title=title, uploader="U", processed_at=f"{date}T00:00:00")
+        update_library_indexes(video_dir, manifest, tmp_path)
+
+    c_path = creator_index_path(tmp_path, platform="youtube", uploader="U")
+    data = json.loads(c_path.read_text(encoding="utf-8"))
+
+    # 20260102 comes first (descending)
+    assert data["videos"][0]["video_id"] == "v3"  # Beta
+    # 20260101: Alpha before Zeta (title ascending)
+    assert data["videos"][1]["video_id"] == "v2"  # Alpha
+    assert data["videos"][2]["video_id"] == "v1"  # Zeta
+
+
+def test_series_index_sort_order(tmp_path: Path):
+    """Series index also sorts: processed_at descending, then title ascending."""
+    for vid, title, date in [
+        ("v1", "Zeta", "20260101"),
+        ("v2", "Alpha", "20260101"),
+    ]:
+        video_dir = video_directory(tmp_path, platform="youtube", uploader="U", title=title, video_id=vid, series="S")
+        video_dir.mkdir(parents=True)
+        manifest = _make_manifest(video_id=vid, title=title, uploader="U", series="S", processed_at=f"{date}T00:00:00")
+        update_library_indexes(video_dir, manifest, tmp_path)
+
+    s_path = series_index_path(tmp_path, platform="youtube", uploader="U", series="S")
+    assert s_path is not None
+    data = json.loads(s_path.read_text(encoding="utf-8"))
+    # Same processed_at: Alpha before Zeta (title ascending)
+    assert data["videos"][0]["video_id"] == "v2"  # Alpha
+    assert data["videos"][1]["video_id"] == "v1"  # Zeta

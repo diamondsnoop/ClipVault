@@ -179,6 +179,16 @@ library/<platform>/<creator>/<series>/<video title - id>/
 
 Manifest includes `"series": "Series Name"` when assigned. Cache boundary is strict: a `--series` run will never hit a non-series cache entry.
 
+### Phase 4 Step 2 — Creator and Series Indexes (completed)
+
+Auto-maintained JSON indexes for library browsing:
+
+- **Creator index** at `library/<platform>/<creator>/_index.json` — lists all videos and aggregates known series.
+- **Series index** at `library/<platform>/<creator>/<series>/_index.json` — created only when `--series` was used.
+- Indexes are plain JSON, updated on both new processing and cache hits.
+- Videos deduplicated by `video_id`; sorted by `processed_at` descending.
+- Relative paths only, so indexes survive library relocation.
+
 Planned work (remaining):
 
 - Add title-rule based auto-assignment later:
@@ -193,7 +203,7 @@ Planned work (remaining):
 Success criteria:
 
 - A user can group videos from the same creator into a named series. ✅
-- Future creator subscriptions can build on the same metadata.
+- Future creator subscriptions can build on the same metadata. ✅ (index foundation)
 
 ## Phase 5: Creator Tracking and Batch Ingestion
 
@@ -251,5 +261,5 @@ These may be revisited only after the transcript vault itself is dependable.
 1. Add focused Bilibili hardening tests and real-link regression notes.
 2. Define a small platform adapter interface before adding Douyin-specific logic.
 3. ~~Add manual `--series` support only after the platform/cache boundary is stable.~~ (done)
-4. Add creator-level index design under `docs/plan/` before implementing subscriptions.
+4. ~~Add creator-level index design under `docs/plan/` before implementing subscriptions.~~ (done)
 5. Keep GUI and AI note generation out of scope until transcript acquisition is dependable.

@@ -16,6 +16,7 @@ from .library import (
     is_completed,
     normalize_series,
     resolve_video_directory,
+    update_library_indexes,
     update_manifest,
     video_directory,
     write_json,
@@ -105,6 +106,12 @@ def process_video(
     if is_completed(video_dir) and not force:
         md_path = video_dir / "transcript.md"
         print(f"[cache] hit: {video_dir}", file=sys.stderr)
+        # Update indexes so pre-index caches get indexed
+        try:
+            cached_manifest = json.loads((video_dir / "manifest.json").read_text(encoding="utf-8"))
+            update_library_indexes(video_dir, cached_manifest, library)
+        except Exception as exc:
+            print(f"[index] failed on cache hit ({video_dir}): {exc}", file=sys.stderr)
         return {
             "status": "cached",
             "title": title,
@@ -158,6 +165,13 @@ def process_video(
         manifest_updates["asr_model"] = model_name
         manifest_updates["asr_device"] = resolve_device(device)
     update_manifest(video_dir / "manifest.json", **manifest_updates)
+
+    # Update indexes after manifest is final
+    try:
+        final_manifest = json.loads((video_dir / "manifest.json").read_text(encoding="utf-8"))
+        update_library_indexes(video_dir, final_manifest, library)
+    except Exception as exc:
+        print(f"[index] failed ({video_dir}): {exc}", file=sys.stderr)
 
     return {
         "status": "ok",

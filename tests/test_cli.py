@@ -151,3 +151,57 @@ def test_process_video_blank_series_equals_no_series(tmp_path: Path, monkeypatch
     assert "untitled" not in result["folder"]
     manifest = json.loads((Path(result["folder"]) / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["series"] is None
+
+
+def test_process_video_cache_hit_creates_index(tmp_path: Path, monkeypatch):
+    """Cache hit without pre-existing index still creates indexes."""
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        "clipvault.cli.extract_info",
+        lambda url, *, verbose: {"title": "T", "uploader": "U", "id": "vid1", "channel_id": "UCx"},
+    )
+    monkeypatch.setattr(
+        "clipvault.cli.get_platform_subtitles",
+        lambda info, platform: ([SubtitleSegment(0.0, 1.0, "h")], "subtitle:en:json3"),
+    )
+
+    from clipvault.cli import process_video
+
+    # First run — creates outputs and index
+    r1 = process_video(
+        url="https://youtube.com/watch?v=vid1",
+        library=tmp_path,
+        model_name="tiny", device="cpu", compute_type="int8",
+        force=True, keep_audio=False, verbose=False,
+        series="Cache Series",
+    )
+    assert r1["status"] == "ok"
+
+    # Remove index files to simulate pre-index cache
+    import shutil
+    c_path = tmp_path / "youtube" / "U" / "_index.json"
+    s_path = tmp_path / "youtube" / "U" / "Cache Series" / "_index.json"
+    assert c_path.exists()
+    assert s_path.exists()
+    c_path.unlink()
+    s_path.unlink()
+
+    # Second run without --force — cache hit
+    r2 = process_video(
+        url="https://youtube.com/watch?v=vid1",
+        library=tmp_path,
+        model_name="tiny", device="cpu", compute_type="int8",
+        force=False, keep_audio=False, verbose=False,
+        series="Cache Series",
+    )
+    assert r2["status"] == "cached"
+
+    # Indexes should have been recreated on cache hit
+    assert c_path.exists()
+    assert s_path.exists()
+    c_data = json.loads(c_path.read_text(encoding="utf-8"))
+    assert len(c_data["videos"]) == 1
+    assert c_data["videos"][0]["video_id"] == "vid1"
+    s_data = json.loads(s_path.read_text(encoding="utf-8"))
+    assert len(s_data["videos"]) == 1
+    assert s_data["videos"][0]["video_id"] == "vid1"

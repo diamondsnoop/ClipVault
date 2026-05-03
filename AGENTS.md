@@ -39,6 +39,13 @@ Manual series grouping:
 - Manifest includes `"series": "Series Name"`.
 - This is manual assignment only; no auto-detection, no creator subscriptions.
 
+Library indexes (auto-maintained):
+
+- `library/<platform>/<creator>/_index.json` — creator index with all videos and series aggregation.
+- `library/<platform>/<creator>/<series>/_index.json` — series index (created only when `--series` is used).
+- Indexes are updated on both new processing and cache hits.
+- Indexes are plain JSON, no database required.
+
 Not yet implemented:
 
 - GUI.

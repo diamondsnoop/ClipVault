@@ -72,6 +72,7 @@ You can force CPU or CUDA:
 library/
   bilibili/
     Creator Name/
+      _index.json               # auto-maintained creator index
       Video Title - BVxxxx/
         manifest.json
         transcript.srt
@@ -79,11 +80,19 @@ library/
         transcript.md
         source_audio.m4a        # kept only when --keep-audio is used
       Series Name/
+        _index.json             # auto-maintained series index
         Video Title - BVxxxx/
           ...
 ```
 
 With `--series`, the path becomes `library/<platform>/<creator>/<series>/<video title - id>/`.
+
+After every successful pipeline run, ClipVault automatically maintains two JSON index files:
+
+- **Creator index** (`library/<platform>/<creator>/_index.json`) — lists all processed videos and known series for that creator.
+- **Series index** (`library/<platform>/<creator>/<series>/_index.json`) — created only when `--series` is used, lists videos in that series.
+
+Indexes are plain JSON files — no database, no external dependencies. They are updated on both new processing runs and cache hits, so even pre-index caches get indexed on access.
 
 Old `library/<creator>/<video title - id>/` folders remain readable for cache compatibility when their manifest and output files are complete.
 
