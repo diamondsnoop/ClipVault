@@ -66,6 +66,16 @@ def platform_languages(platform: str) -> tuple[str, ...]:
     return info["languages"] if info else ("en",)
 
 
+def _flat_entry_url(entry: dict[str, Any]) -> str | None:
+    video_url = entry.get("webpage_url") or entry.get("url")
+    if isinstance(video_url, str) and urllib.parse.urlparse(video_url).scheme:
+        return video_url
+    video_id = entry.get("id")
+    if entry.get("ie_key") == "Youtube" and video_id:
+        return f"https://www.youtube.com/watch?v={video_id}"
+    return video_url if isinstance(video_url, str) and video_url.strip() else None
+
+
 def extract_info(url: str, *, verbose: bool) -> dict[str, Any]:
     print(f"[metadata] extracting info for {url}", file=sys.stderr)
     opts: dict[str, Any] = {
@@ -89,6 +99,48 @@ def extract_info(url: str, *, verbose: bool) -> dict[str, Any]:
     uploader = info.get("uploader", "unknown")
     print(f"[metadata] ok: \"{title}\" by {uploader}", file=sys.stderr)
     return info
+
+
+def extract_creator_entries(url: str, *, limit: int, verbose: bool) -> list[dict[str, Any]]:
+    print(f"[creator] fetching recent entries from {url}", file=sys.stderr)
+    opts: dict[str, Any] = {
+        "quiet": not verbose,
+        "no_warnings": not verbose,
+        "skip_download": True,
+        "extract_flat": "in_playlist",
+        "playlistend": max(1, limit),
+        "ignoreerrors": True,
+        "proxy": "",
+    }
+    try:
+        with YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to fetch creator entries from {url}. Check the URL, network connection, "
+            f"and whether yt-dlp supports this creator page."
+        ) from exc
+    if not isinstance(info, dict):
+        raise RuntimeError(f"yt-dlp did not return creator metadata for {url}.")
+    raw_entries = info.get("entries") or []
+    entries: list[dict[str, Any]] = []
+    for entry in raw_entries:
+        if not isinstance(entry, dict):
+            continue
+        video_url = _flat_entry_url(entry)
+        if not video_url:
+            continue
+        entries.append({
+            "id": entry.get("id"),
+            "title": entry.get("title") or "untitled",
+            "url": video_url,
+            "duration": entry.get("duration"),
+            "upload_date": entry.get("upload_date"),
+        })
+        if len(entries) >= limit:
+            break
+    print(f"[creator] discovered: {len(entries)}", file=sys.stderr)
+    return entries
 
 
 def download_audio(url: str, video_dir: Path, *, verbose: bool) -> Path:
@@ -119,4 +171,3 @@ def download_audio(url: str, video_dir: Path, *, verbose: bool) -> Path:
         )
     print(f"[audio] saved to {matches[0]}", file=sys.stderr)
     return matches[0]
-

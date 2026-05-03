@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .asr import resolve_device, transcribe_audio
-from .creators import add_creator_source, list_creator_sources
+from .creators import add_creator_source, fetch_creator_videos, list_creator_sources
 from .exporters import write_outputs
 from .library import (
     build_manifest,
@@ -122,6 +122,12 @@ def process_creator_command(argv: list[str] | None = None) -> dict[str, Any]:
     list_parser = subparsers.add_parser("list", help="List recorded creator sources.")
     list_parser.add_argument("--library", type=Path, default=DEFAULT_LIBRARY, help="Subtitle library root.")
 
+    fetch_parser = subparsers.add_parser("fetch", help="Fetch recent video entries for a recorded creator.")
+    fetch_parser.add_argument("selector", help="Creator id, name, or source URL.")
+    fetch_parser.add_argument("--library", type=Path, default=DEFAULT_LIBRARY, help="Subtitle library root.")
+    fetch_parser.add_argument("--limit", type=int, default=20, help="Maximum entries to fetch. Default: 20.")
+    fetch_parser.add_argument("--verbose", "-v", action="store_true", help="Show yt-dlp logs.")
+
     args = parser.parse_args(argv)
     try:
         if args.command == "add":
@@ -129,6 +135,13 @@ def process_creator_command(argv: list[str] | None = None) -> dict[str, Any]:
             return {"status": "ok", "creator": record}
         if args.command == "list":
             return {"status": "ok", "creators": list_creator_sources(args.library)}
+        if args.command == "fetch":
+            return fetch_creator_videos(
+                args.library,
+                selector=args.selector,
+                limit=args.limit,
+                verbose=args.verbose,
+            )
     except Exception as exc:  # noqa: BLE001 - CLI should report cleanly
         print(f"[error] {exc}", file=sys.stderr)
         raise SystemExit(1) from exc

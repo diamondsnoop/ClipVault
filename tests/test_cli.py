@@ -441,3 +441,26 @@ def test_process_creator_list_command(tmp_path: Path):
     assert result["status"] == "ok"
     assert len(result["creators"]) == 1
     assert result["creators"][0]["name"] == "Jabzy"
+
+
+def test_process_creator_fetch_command(tmp_path: Path, monkeypatch):
+    from clipvault.cli import process_creator_command
+
+    process_creator_command([
+        "add",
+        "https://www.youtube.com/@Jabzy",
+        "--name",
+        "Jabzy",
+        "--library",
+        str(tmp_path),
+    ])
+    monkeypatch.setattr(
+        "clipvault.creators.extract_creator_entries",
+        lambda url, *, limit, verbose: [{"id": "v1", "title": "One", "url": "https://youtube.com/watch?v=v1"}],
+    )
+
+    result = process_creator_command(["fetch", "Jabzy", "--limit", "1", "--library", str(tmp_path)])
+
+    assert result["status"] == "ok"
+    assert result["mode"] == "preview"
+    assert result["count"] == 1

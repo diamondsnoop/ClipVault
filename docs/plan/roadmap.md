@@ -241,14 +241,28 @@ clipvault creator list
 - Adding the same source URL is idempotent and updates the display name.
 - This step does not fetch recent videos yet.
 
+### Phase 5 Step 2 — Creator Fetch Preview (completed)
+
+Read-only recent-entry discovery for recorded creators:
+
+```powershell
+clipvault creator fetch <creator-id-or-name> --limit 20
+```
+
+- Uses the recorded `source_url` from `library/_creators.json`.
+- Asks `yt-dlp` for recent flat playlist/channel entries.
+- Returns discovered video titles and URLs as JSON.
+- Updates `last_checked_at`.
+- Does not process transcripts or queue ASR jobs yet.
+
 Planned work:
 
 - ~~Add creator/channel source records.~~
 - Add commands:
   - ~~`clipvault creator add <url>`.~~
   - ~~`clipvault creator list`.~~
-  - `clipvault creator fetch <creator>`.
-- Fetch recent videos from a creator/channel.
+  - ~~`clipvault creator fetch <creator>`.~~
+- ~~Fetch recent videos from a creator/channel.~~ (preview only)
 - Skip already processed videos.
 - Queue transcript jobs.
 - Report per-video status.

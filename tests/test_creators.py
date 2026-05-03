@@ -8,6 +8,8 @@ import pytest
 from clipvault.creators import (
     add_creator_source,
     creator_registry_path,
+    fetch_creator_videos,
+    find_creator_source,
     list_creator_sources,
     load_creator_registry,
 )
@@ -81,3 +83,41 @@ def test_invalid_registry_shape_is_non_blocking(tmp_path: Path, capsys):
 
     assert registry["creators"] == []
     assert "invalid registry shape" in capsys.readouterr().err
+
+
+def test_find_creator_source_by_id_name_and_url(tmp_path: Path):
+    record = add_creator_source(tmp_path, source_url="https://www.youtube.com/@Jabzy", name="Jabzy")
+
+    assert find_creator_source(tmp_path, record["id"])["id"] == record["id"]
+    assert find_creator_source(tmp_path, "jabzy")["id"] == record["id"]
+    assert find_creator_source(tmp_path, "https://www.youtube.com/@jabzy")["id"] == record["id"]
+
+
+def test_fetch_creator_videos_preview_updates_checked_at(tmp_path: Path, monkeypatch):
+    add_creator_source(tmp_path, source_url="https://www.youtube.com/@Jabzy", name="Jabzy")
+
+    def fake_extract_creator_entries(url: str, *, limit: int, verbose: bool):
+        assert url == "https://www.youtube.com/@Jabzy"
+        assert limit == 2
+        assert verbose is False
+        return [
+            {"id": "v1", "title": "One", "url": "https://youtube.com/watch?v=v1"},
+            {"id": "v2", "title": "Two", "url": "https://youtube.com/watch?v=v2"},
+        ]
+
+    monkeypatch.setattr("clipvault.creators.extract_creator_entries", fake_extract_creator_entries)
+
+    result = fetch_creator_videos(tmp_path, selector="Jabzy", limit=2)
+
+    assert result["status"] == "ok"
+    assert result["mode"] == "preview"
+    assert result["count"] == 2
+    registry = load_creator_registry(tmp_path)
+    assert registry["creators"][0]["last_checked_at"] is not None
+
+
+def test_fetch_creator_videos_rejects_bad_limit(tmp_path: Path):
+    add_creator_source(tmp_path, source_url="https://www.youtube.com/@Jabzy", name="Jabzy")
+
+    with pytest.raises(ValueError, match="limit"):
+        fetch_creator_videos(tmp_path, selector="Jabzy", limit=0)

@@ -129,6 +129,9 @@ If index files are deleted, stale, or inconsistent, rebuild them from existing c
 
 # List recorded creator/channel sources
 .\clipvault.ps1 creator list
+
+# Preview recent video entries for a recorded creator
+.\clipvault.ps1 creator fetch "Jabzy" --limit 10
 ```
 
 ## Auto Series Rules
@@ -177,6 +180,7 @@ ClipVault can record creator/channel source URLs for later batch ingestion:
 ```powershell
 .\clipvault.ps1 creator add "https://www.youtube.com/@Jabzy" --name "Jabzy"
 .\clipvault.ps1 creator list
+.\clipvault.ps1 creator fetch "Jabzy" --limit 10
 ```
 
 Creator records are stored locally in:
@@ -185,7 +189,8 @@ Creator records are stored locally in:
 library/_creators.json
 ```
 
-This is only the source registry. It does not fetch recent videos yet.
+`creator fetch` currently previews recent video entries only. It does not
+process transcripts or enqueue ASR jobs yet.
 
 ## Repository Hygiene
 

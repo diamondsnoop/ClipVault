@@ -7,6 +7,11 @@ Use these prefixes:
 - `[creator] added: <name> (<platform>)` — a new source was recorded.
 - `[creator] updated: <name> (<platform>)` — an existing source URL was updated.
 - `[creator] listed: <count>` — records were listed.
+- `[creator] fetching: <name> (<platform>)` — a recorded source is being used
+  for recent-entry discovery.
+- `[creator] fetching recent entries from <url>` — `yt-dlp` flat extraction is
+  starting for a source URL.
+- `[creator] discovered: <count>` — recent-entry discovery completed.
 - `[creator] registry: <path>` — registry file path after a write.
 - `[creator] registry load failed (<path>): <reason>` — registry JSON could not
   be read.

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from clipvault.platforms import PLATFORMS, identify_platform, platform_languages
+from clipvault.platforms import PLATFORMS, _flat_entry_url, identify_platform, platform_languages
 
 
 # ── identify_platform ──────────────────────────────────────────────────
@@ -76,6 +76,17 @@ def test_languages_unknown():
 def test_languages_unregistered():
     langs = platform_languages("nonexistent")
     assert langs == ("en",)
+
+
+# ── flat playlist entries ─────────────────────────────────────────────
+
+
+def test_flat_entry_url_prefers_webpage_url():
+    assert _flat_entry_url({"webpage_url": "https://example.com/v", "url": "abc"}) == "https://example.com/v"
+
+
+def test_flat_entry_url_builds_youtube_url_from_id():
+    assert _flat_entry_url({"ie_key": "Youtube", "id": "abc", "url": "abc"}) == "https://www.youtube.com/watch?v=abc"
 
 
 # ── PLATFORMS registry shape ──────────────────────────────────────────
