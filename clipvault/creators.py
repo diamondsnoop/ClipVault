@@ -99,6 +99,40 @@ def load_job_queue(library: Path) -> dict[str, Any]:
     return data
 
 
+def write_job_queue(library: Path, queue: dict[str, Any]) -> Path:
+    queue["schema_version"] = JOB_QUEUE_SCHEMA_VERSION
+    queue["type"] = "transcript_job_queue"
+    queue["updated_at"] = _now()
+    path = job_queue_path(library)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_json(path, queue)
+    return path
+
+
+def list_queue_jobs(library: Path, *, status: str | None = None) -> list[dict[str, Any]]:
+    queue = load_job_queue(library)
+    jobs = queue.get("jobs", [])
+    if status:
+        jobs = [job for job in jobs if job.get("status") == status]
+    jobs = sorted(jobs, key=lambda job: str(job.get("added_at") or ""))
+    print(f"[queue] listed: {len(jobs)}", file=sys.stderr)
+    return jobs
+
+
+def queue_status(library: Path) -> dict[str, Any]:
+    jobs = load_job_queue(library).get("jobs", [])
+    counts: dict[str, int] = {}
+    for job in jobs:
+        status = str(job.get("status") or "unknown")
+        counts[status] = counts.get(status, 0) + 1
+    print(f"[queue] status: {counts}", file=sys.stderr)
+    return {
+        "status": "ok",
+        "total": len(jobs),
+        "counts": counts,
+    }
+
+
 def list_creator_sources(library: Path) -> list[dict[str, Any]]:
     registry = load_creator_registry(library)
     creators = sorted(
@@ -248,11 +282,7 @@ def enqueue_creator_videos(
         existing_urls.add(source_url)
         added.append(job)
 
-    queue["schema_version"] = JOB_QUEUE_SCHEMA_VERSION
-    queue["type"] = "transcript_job_queue"
-    queue["updated_at"] = now
-    path = job_queue_path(library)
-    write_json(path, queue)
+    path = write_job_queue(library, queue)
     print(
         f"[queue] added: {len(added)}, skipped processed: {skipped_processed}, skipped existing: {skipped_existing}",
         file=sys.stderr,

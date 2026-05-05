@@ -135,6 +135,11 @@ If index files are deleted, stale, or inconsistent, rebuild them from existing c
 
 # Add new entries to the local transcript job queue
 .\clipvault.ps1 creator enqueue "Jabzy" --limit 10
+
+# Inspect and run queued transcript jobs
+.\clipvault.ps1 queue status
+.\clipvault.ps1 queue list
+.\clipvault.ps1 queue run --limit 1
 ```
 
 ## Auto Series Rules
@@ -203,7 +208,18 @@ process transcripts or enqueue ASR jobs yet.
 library/_queue.json
 ```
 
-Queue entries are marked `pending`. ClipVault does not run queued jobs yet.
+Queue entries are marked `pending` until they are run.
+
+Run queued jobs explicitly:
+
+```powershell
+.\clipvault.ps1 queue status
+.\clipvault.ps1 queue list --status pending
+.\clipvault.ps1 queue run --limit 1
+```
+
+`queue run` defaults to one pending job at a time. Use `--retry-failed` to retry
+failed jobs.
 
 ## Repository Hygiene
 

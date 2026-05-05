@@ -8,7 +8,16 @@ from pathlib import Path
 from typing import Any
 
 from .asr import resolve_device, transcribe_audio
-from .creators import add_creator_source, enqueue_creator_videos, fetch_creator_videos, list_creator_sources
+from .creators import (
+    add_creator_source,
+    enqueue_creator_videos,
+    fetch_creator_videos,
+    list_creator_sources,
+    list_queue_jobs,
+    load_job_queue,
+    queue_status,
+    write_job_queue,
+)
 from .exporters import write_outputs
 from .library import (
     build_manifest,
@@ -28,7 +37,7 @@ from .subtitles import get_platform_subtitles
 
 
 DEFAULT_LIBRARY = Path.cwd() / "library"
-TOP_LEVEL_COMMANDS = {"video", "library", "creator"}
+TOP_LEVEL_COMMANDS = {"video", "library", "creator", "queue"}
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -55,6 +64,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_video_parser(subparsers)
     _add_library_parser(subparsers)
     _add_creator_parser(subparsers)
+    _add_queue_parser(subparsers)
     return parser
 
 
@@ -130,6 +140,36 @@ def _add_creator_parser(subparsers: argparse._SubParsersAction[argparse.Argument
     enqueue_parser.set_defaults(handler=_run_creator_enqueue)
 
 
+def _add_queue_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subparsers.add_parser("queue", help="Inspect and run transcript jobs.")
+    queue_subparsers = parser.add_subparsers(dest="queue_command", required=True)
+
+    list_parser = queue_subparsers.add_parser("list", help="List queued transcript jobs.")
+    _add_library_option(list_parser, default=argparse.SUPPRESS)
+    list_parser.add_argument("--status", type=str, default=None, help="Filter by job status.")
+    list_parser.set_defaults(handler=_run_queue_list)
+
+    status_parser = queue_subparsers.add_parser("status", help="Summarize queued transcript jobs.")
+    _add_library_option(status_parser, default=argparse.SUPPRESS)
+    status_parser.set_defaults(handler=_run_queue_status)
+
+    run_parser = queue_subparsers.add_parser("run", help="Run pending transcript jobs.")
+    _add_library_option(run_parser, default=argparse.SUPPRESS)
+    run_parser.add_argument("--limit", type=int, default=1, help="Maximum jobs to run. Default: 1.")
+    run_parser.add_argument("--retry-failed", action="store_true", help="Run failed jobs as well as pending jobs.")
+    run_parser.add_argument("--model", default="small", help="faster-whisper model size/name. Default: small.")
+    run_parser.add_argument(
+        "--device",
+        choices=("auto", "cuda", "cpu"),
+        default="auto",
+        help="ASR device. Default: auto, which prefers CUDA when available.",
+    )
+    run_parser.add_argument("--compute-type", default="auto", help="faster-whisper compute type. Default: auto.")
+    run_parser.add_argument("--keep-audio", action="store_true", help="Keep downloaded audio after ASR.")
+    run_parser.add_argument("--verbose", "-v", action="store_true", help="Show yt-dlp logs.")
+    run_parser.set_defaults(handler=_run_queue_run)
+
+
 def _normalize_legacy_args(args: list[str]) -> list[str]:
     if not args or args[0] in TOP_LEVEL_COMMANDS:
         return args
@@ -153,6 +193,11 @@ def process_library_command(argv: list[str] | None = None) -> dict[str, Any]:
 
 def process_creator_command(argv: list[str] | None = None) -> dict[str, Any]:
     args = build_parser().parse_args(["creator", *(argv or [])])
+    return run_parsed_args(args)
+
+
+def process_queue_command(argv: list[str] | None = None) -> dict[str, Any]:
+    args = build_parser().parse_args(["queue", *(argv or [])])
     return run_parsed_args(args)
 
 
@@ -199,6 +244,76 @@ def _run_creator_enqueue(args: argparse.Namespace) -> dict[str, Any]:
         limit=args.limit,
         verbose=args.verbose,
     )
+
+
+def _run_queue_list(args: argparse.Namespace) -> dict[str, Any]:
+    return {"status": "ok", "jobs": list_queue_jobs(args.library, status=args.status)}
+
+
+def _run_queue_status(args: argparse.Namespace) -> dict[str, Any]:
+    return queue_status(args.library)
+
+
+def _run_queue_run(args: argparse.Namespace) -> dict[str, Any]:
+    if args.limit < 1:
+        raise ValueError("limit must be at least 1")
+
+    queue = load_job_queue(args.library)
+    eligible = {"pending", "failed"} if args.retry_failed else {"pending"}
+    jobs = [job for job in queue.get("jobs", []) if job.get("status") in eligible][: args.limit]
+    print(f"[queue] running: {len(jobs)}", file=sys.stderr)
+
+    succeeded = 0
+    failed = 0
+    results: list[dict[str, Any]] = []
+    for job in jobs:
+        source_url = str(job.get("source_url") or "").strip()
+        if not source_url:
+            job["status"] = "failed"
+            job["last_error"] = "missing source_url"
+            failed += 1
+            continue
+        print(f"[queue] job start: {job.get('id')} {source_url}", file=sys.stderr)
+        job["status"] = "running"
+        job["last_error"] = None
+        write_job_queue(args.library, queue)
+        try:
+            result = process_video(
+                url=source_url,
+                library=args.library,
+                model_name=args.model,
+                device=args.device,
+                compute_type=args.compute_type,
+                force=False,
+                keep_audio=args.keep_audio,
+                verbose=args.verbose,
+                series=None,
+            )
+        except Exception as exc:  # noqa: BLE001 - per-job failure should be recorded
+            job["status"] = "failed"
+            job["last_error"] = str(exc)
+            failed += 1
+            print(f"[queue] job failed: {job.get('id')} {exc}", file=sys.stderr)
+        else:
+            job["status"] = "done"
+            job["result"] = {
+                "folder": result.get("folder"),
+                "markdown": result.get("markdown"),
+                "source": result.get("source"),
+            }
+            succeeded += 1
+            results.append({"job_id": job.get("id"), "result": result})
+            print(f"[queue] job done: {job.get('id')}", file=sys.stderr)
+        finally:
+            write_job_queue(args.library, queue)
+
+    return {
+        "status": "ok",
+        "processed_count": len(jobs),
+        "succeeded_count": succeeded,
+        "failed_count": failed,
+        "results": results,
+    }
 
 
 def process_video(

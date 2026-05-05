@@ -25,6 +25,13 @@ Use these prefixes:
 - `[queue] load failed (<path>): <reason>` — queue JSON could not be read.
 - `[queue] invalid queue shape (<path>), starting empty` — queue file exists
   but does not match the expected shape.
+- `[queue] listed: <count>` — queued jobs were listed.
+- `[queue] status: <counts>` — queue status summary was reported.
+- `[queue] running: <count>` — queue execution selected jobs to run.
+- `[queue] job start: <id> <url>` — one queued video is starting.
+- `[queue] job done: <id>` — one queued video finished successfully.
+- `[queue] job failed: <id> <reason>` — one queued video failed and was
+  recorded in `_queue.json`.
 
 Creator registry failures should be understandable from the command output.
 Unknown platforms should fail clearly instead of creating ambiguous records.

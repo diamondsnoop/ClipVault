@@ -276,7 +276,22 @@ clipvault creator enqueue <creator-id-or-name> --limit 20
 - Writes pending jobs to `library/_queue.json`.
 - Skips entries already processed in the local library.
 - Skips entries already present in the queue.
-- Does not execute downloads, subtitle fetching, or ASR yet.
+- Queue execution is handled by Step 5.
+
+### Phase 5 Step 5 — Queue Execution (completed)
+
+Run pending transcript jobs through the existing single-video pipeline:
+
+```powershell
+clipvault queue status
+clipvault queue list --status pending
+clipvault queue run --limit 1
+```
+
+- `queue run` defaults to one pending job to avoid accidental bulk ASR.
+- Successful jobs become `done` and store output metadata.
+- Failed jobs become `failed` and keep `last_error`.
+- `--retry-failed` allows explicit retries.
 
 Planned work:
 
@@ -288,7 +303,7 @@ Planned work:
 - ~~Fetch recent videos from a creator/channel.~~ (preview only)
 - ~~Skip already processed videos.~~ (status marking only)
 - ~~Queue transcript jobs.~~
-- Report per-video status.
+- ~~Report per-video status.~~
 
 Success criteria:
 

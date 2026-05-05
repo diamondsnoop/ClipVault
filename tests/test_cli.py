@@ -14,6 +14,7 @@ def test_top_level_help_discovers_subcommands():
     assert "video" in help_text
     assert "library" in help_text
     assert "creator" in help_text
+    assert "queue" in help_text
 
 
 def test_legacy_video_args_are_normalized():
@@ -512,3 +513,84 @@ def test_process_creator_enqueue_command(tmp_path: Path, monkeypatch):
     assert result["status"] == "ok"
     assert result["added_count"] == 1
     assert (tmp_path / "_queue.json").exists()
+
+
+# ── Queue CLI ─────────────────────────────────────────────────────────
+
+
+def test_process_queue_list_and_status_commands(tmp_path: Path):
+    from clipvault.cli import process_queue_command
+    from clipvault.creators import write_job_queue
+
+    write_job_queue(
+        tmp_path,
+        {
+            "jobs": [
+                {"id": "one", "status": "pending", "source_url": "https://youtube.com/watch?v=1"},
+                {"id": "two", "status": "done", "source_url": "https://youtube.com/watch?v=2"},
+            ],
+        },
+    )
+
+    listed = process_queue_command(["list", "--library", str(tmp_path), "--status", "pending"])
+    status = process_queue_command(["status", "--library", str(tmp_path)])
+
+    assert [job["id"] for job in listed["jobs"]] == ["one"]
+    assert status["counts"] == {"pending": 1, "done": 1}
+
+
+def test_process_queue_run_command(tmp_path: Path, monkeypatch):
+    from clipvault.cli import process_queue_command
+    from clipvault.creators import load_job_queue, write_job_queue
+
+    write_job_queue(
+        tmp_path,
+        {
+            "jobs": [
+                {"id": "one", "status": "pending", "source_url": "https://youtube.com/watch?v=1"},
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        "clipvault.cli.process_video",
+        lambda **kwargs: {
+            "status": "ok",
+            "folder": str(tmp_path / "out"),
+            "markdown": str(tmp_path / "out" / "transcript.md"),
+            "source": "subtitle:en:json3",
+        },
+    )
+
+    result = process_queue_command(["run", "--library", str(tmp_path)])
+
+    assert result["processed_count"] == 1
+    assert result["succeeded_count"] == 1
+    queue = load_job_queue(tmp_path)
+    assert queue["jobs"][0]["status"] == "done"
+    assert queue["jobs"][0]["result"]["source"] == "subtitle:en:json3"
+
+
+def test_process_queue_run_records_failure(tmp_path: Path, monkeypatch):
+    from clipvault.cli import process_queue_command
+    from clipvault.creators import load_job_queue, write_job_queue
+
+    write_job_queue(
+        tmp_path,
+        {
+            "jobs": [
+                {"id": "bad", "status": "pending", "source_url": "https://youtube.com/watch?v=bad"},
+            ],
+        },
+    )
+
+    def fail_process_video(**kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("clipvault.cli.process_video", fail_process_video)
+
+    result = process_queue_command(["run", "--library", str(tmp_path)])
+
+    assert result["failed_count"] == 1
+    queue = load_job_queue(tmp_path)
+    assert queue["jobs"][0]["status"] == "failed"
+    assert queue["jobs"][0]["last_error"] == "boom"

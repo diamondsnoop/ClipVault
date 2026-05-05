@@ -65,7 +65,8 @@ Creator source registry (Phase 5 Step 1):
 - Fetch entries include `library_status` as `new` or `processed`.
 - Fetch preview does not process transcripts or queue ASR jobs yet.
 - `clipvault creator enqueue <selector>` writes `new` entries to `library/_queue.json`.
-- Queue entries are `pending`; queue execution is not implemented yet.
+- `clipvault queue list/status/run` inspects and executes queued transcript jobs.
+- `queue run` defaults to one pending job and calls the existing video pipeline.
 
 Not yet implemented:
 
@@ -175,6 +176,8 @@ Record and list creator/channel sources:
 .\clipvault.ps1 creator list
 .\clipvault.ps1 creator fetch "Jabzy" --limit 10
 .\clipvault.ps1 creator enqueue "Jabzy" --limit 10
+.\clipvault.ps1 queue status
+.\clipvault.ps1 queue run --limit 1
 ```
 
 ## Manual Platform Samples
