@@ -1,92 +1,17 @@
 from __future__ import annotations
 
 import sys
-import urllib.parse
 from pathlib import Path
 from typing import Any
 
 from yt_dlp import YoutubeDL
 
-# ── Platform registry ──────────────────────────────────────────────────
-# Single source of truth for platform identification and capabilities.
-# Add a new entry here when supporting a new video platform.
-
-PLATFORMS: dict[str, dict[str, Any]] = {
-    "bilibili": {
-        "domains": ("bilibili.com", "b23.tv"),
-        "languages": ("zh-CN", "zh-Hans", "zh-Hans-CN", "zh", "cmn-Hans-CN", "en"),
-    },
-    "youtube": {
-        "domains": ("youtube.com", "youtu.be"),
-        "languages": ("en", "zh-CN", "zh-Hans", "zh"),
-    },
-    "douyin": {
-        "domains": ("douyin.com",),
-        "languages": ("zh-CN", "zh-Hans", "zh"),
-    },
-}
-
-
-def _domain_match(hostname: str, domain: str) -> bool:
-    """Return True when *hostname* exactly equals *domain* or is a
-    subdomain of *domain* (e.g. ``www.youtube.com`` matches ``youtube.com``)."""
-    hostname = hostname.lower()
-    domain = domain.lower()
-    return hostname == domain or hostname.endswith("." + domain)
-
-
-def identify_platform(url: str) -> str:
-    """Identify the video platform from a URL.
-
-    Parses the URL and matches the hostname against the registered
-    *domains* in :data:`PLATFORMS`.  Subdomain matches (e.g.
-    ``www.youtube.com`` → ``youtube.com``) are accepted; unrelated
-    domains that happen to contain a pattern string (e.g.
-    ``notyoutube.com``, ``youtube.com.evil.test``) are rejected.
-
-    Returns a platform key registered in PLATFORMS, or ``"unknown"``.
-    """
-    try:
-        hostname = urllib.parse.urlparse(url).hostname
-    except Exception:
-        hostname = None
-    if not hostname:
-        return "unknown"
-
-    for name, config in PLATFORMS.items():
-        for domain in config["domains"]:
-            if _domain_match(hostname, domain):
-                return name
-    return "unknown"
-
-
-def platform_languages(platform: str) -> tuple[str, ...]:
-    """Preferred subtitle language tags for *platform*, in priority order."""
-    info = PLATFORMS.get(platform)
-    return info["languages"] if info else ("en",)
+from .adapters import PLATFORMS, adapter_for_url, identify_platform, platform_languages
 
 
 def _flat_entry_url(entry: dict[str, Any], *, source_url: str) -> str | None:
-    video_url = entry.get("webpage_url") or entry.get("url")
-    if isinstance(video_url, str) and urllib.parse.urlparse(video_url).scheme:
-        return video_url
-    video_id = entry.get("id")
-    platform = identify_platform(source_url)
-    if (entry.get("ie_key") == "Youtube" or platform == "youtube") and video_id:
-        return f"https://www.youtube.com/watch?v={video_id}"
-    if platform == "bilibili":
-        candidate = str(video_id or video_url or "").strip()
-        if candidate.startswith(("BV", "av")):
-            return f"https://www.bilibili.com/video/{candidate}"
-    if platform == "douyin":
-        candidate = str(video_id or video_url or "").strip()
-        if candidate and not candidate.startswith("/"):
-            return f"https://www.douyin.com/video/{candidate}"
-    if isinstance(video_url, str) and video_url.strip():
-        joined = urllib.parse.urljoin(source_url, video_url)
-        if urllib.parse.urlparse(joined).scheme:
-            return joined
-    return None
+    adapter = adapter_for_url(source_url)
+    return adapter.flat_entry_url(entry, source_url=source_url) if adapter else None
 
 
 def extract_info(url: str, *, verbose: bool) -> dict[str, Any]:

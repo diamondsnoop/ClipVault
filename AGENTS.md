@@ -80,6 +80,7 @@ Not yet implemented:
 ## Repository Layout
 
 - `clipvault/cli.py`: CLI entrypoint and high-level pipeline orchestration.
+- `clipvault/adapters.py`: Platform adapter registry for domains, subtitle languages, and flat entry URL completion.
 - `clipvault/platforms.py`: URL metadata extraction and audio download via `yt-dlp`.
 - `clipvault/subtitles.py`: Subtitle track selection, download, and parsing.
 - `clipvault/asr.py`: `faster-whisper`, CUDA/CPU selection, local model resolution.

@@ -34,6 +34,7 @@ Implemented as of the current baseline:
   - `requirements-gpu-win.lock` for optional Windows NVIDIA GPU runtime.
 - Core code split into modules:
   - `cli.py`
+  - `adapters.py`
   - `platforms.py`
   - `subtitles.py`
   - `asr.py`
