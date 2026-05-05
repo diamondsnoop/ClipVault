@@ -68,6 +68,19 @@ Creator source registry (Phase 5 Step 1):
 - `clipvault queue list/status/run` inspects and executes queued transcript jobs.
 - `queue run` defaults to one pending job and calls the existing video pipeline.
 
+Authenticated platform access:
+
+- `--cookies <path>` accepts a local Netscape-format `cookies.txt` file.
+- Cookies are passed to `yt-dlp` metadata extraction, creator fetches, audio
+  downloads, and subtitle HTTP downloads.
+- Supported commands:
+  - `clipvault video <url> --cookies <path>`
+  - `clipvault creator fetch <selector> --cookies <path>`
+  - `clipvault creator enqueue <selector> --cookies <path>`
+  - `clipvault queue run --cookies <path>`
+- Cookie files are credentials. Never commit, log, paste, or expose their
+  contents.
+
 Not yet implemented:
 
 - GUI.
@@ -139,6 +152,15 @@ Group into a series:
 .\clipvault.ps1 "https://www.bilibili.com/video/BV..." --series "睡前消息"
 ```
 
+Use Bilibili login cookies:
+
+```powershell
+mkdir .secrets
+# Export browser cookies in Netscape cookies.txt format and save:
+# .secrets\bilibili-cookies.txt
+.\clipvault.ps1 "https://www.bilibili.com/video/BV..." --cookies ".secrets\bilibili-cookies.txt"
+```
+
 Force CPU:
 
 ```powershell
@@ -179,6 +201,8 @@ Record and list creator/channel sources:
 .\clipvault.ps1 creator enqueue "Jabzy" --limit 10
 .\clipvault.ps1 queue status
 .\clipvault.ps1 queue run --limit 1
+.\clipvault.ps1 creator fetch "闲木鱼" --cookies ".secrets\bilibili-cookies.txt"
+.\clipvault.ps1 queue run --limit 1 --cookies ".secrets\bilibili-cookies.txt"
 ```
 
 ## Manual Platform Samples
@@ -197,6 +221,7 @@ When testing with these samples, record the exact URL, date, whether subtitles w
 - Keep the project focused on transcript acquisition and transcript library maintenance.
 - Do not add AI note generation until transcript acquisition and library management are stable.
 - Do not commit generated transcripts, audio files, model caches, `.venv/`, or package caches.
+- Do not commit `.secrets/`, `cookies.txt`, `*.cookies.txt`, or any exported login credentials.
 - Keep GPU runtime optional; do not force all users to install large NVIDIA packages.
 - Preserve existing CLI behavior unless explicitly changing it.
 - Prefer small, testable modules over adding more logic to `cli.py`.
@@ -246,6 +271,7 @@ Program logs are about runtime observability. When adding or changing code, make
 - What succeeded, including subtitle source, ASR device/model, output paths, and elapsed time when useful.
 - What failed, including the operation, error reason, and practical next checks.
 - Whether the tool is falling back, such as CUDA to CPU or platform subtitles to ASR.
+- Whether authenticated access is enabled, without printing cookie contents.
 
 The current CLI may use simple stderr/stdout messages. As ClipVault grows, prefer a structured logging layer that can later support GUI progress display, log files, and bug reports.
 
@@ -265,11 +291,14 @@ Develop ClipVault as a long-lived, professional, friendly open source project:
 Ignored local/runtime directories include:
 
 - `.venv/`
+- `.secrets/`
 - `.pip-cache/`
 - `.uv-cache/`
 - `.tmp/`
 - `library/`
 - `vendor/wheels/`
+- `cookies.txt`
+- `*.cookies.txt`
 
 Before committing:
 

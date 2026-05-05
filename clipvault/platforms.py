@@ -6,6 +6,7 @@ from typing import Any
 
 from yt_dlp import YoutubeDL
 
+from .auth import apply_ytdlp_cookies
 from .adapters import PLATFORMS, adapter_for_url, identify_platform, platform_languages
 
 
@@ -14,7 +15,7 @@ def _flat_entry_url(entry: dict[str, Any], *, source_url: str) -> str | None:
     return adapter.flat_entry_url(entry, source_url=source_url) if adapter else None
 
 
-def extract_info(url: str, *, verbose: bool) -> dict[str, Any]:
+def extract_info(url: str, *, verbose: bool, cookies: Path | str | None = None) -> dict[str, Any]:
     print(f"[metadata] extracting info for {url}", file=sys.stderr)
     opts: dict[str, Any] = {
         "quiet": not verbose,
@@ -23,6 +24,7 @@ def extract_info(url: str, *, verbose: bool) -> dict[str, Any]:
         "noplaylist": True,
         "proxy": "",
     }
+    apply_ytdlp_cookies(opts, cookies)
     try:
         with YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -39,7 +41,13 @@ def extract_info(url: str, *, verbose: bool) -> dict[str, Any]:
     return info
 
 
-def extract_creator_entries(url: str, *, limit: int, verbose: bool) -> list[dict[str, Any]]:
+def extract_creator_entries(
+    url: str,
+    *,
+    limit: int,
+    verbose: bool,
+    cookies: Path | str | None = None,
+) -> list[dict[str, Any]]:
     print(f"[creator] fetching recent entries from {url}", file=sys.stderr)
     opts: dict[str, Any] = {
         "quiet": not verbose,
@@ -50,6 +58,7 @@ def extract_creator_entries(url: str, *, limit: int, verbose: bool) -> list[dict
         "ignoreerrors": True,
         "proxy": "",
     }
+    apply_ytdlp_cookies(opts, cookies)
     try:
         with YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -81,7 +90,7 @@ def extract_creator_entries(url: str, *, limit: int, verbose: bool) -> list[dict
     return entries
 
 
-def download_audio(url: str, video_dir: Path, *, verbose: bool) -> Path:
+def download_audio(url: str, video_dir: Path, *, verbose: bool, cookies: Path | str | None = None) -> Path:
     print(f"[audio] downloading audio from {url}", file=sys.stderr)
     output = str(video_dir / "source_audio.%(ext)s")
     opts: dict[str, Any] = {
@@ -99,6 +108,7 @@ def download_audio(url: str, video_dir: Path, *, verbose: bool) -> Path:
             }
         ],
     }
+    apply_ytdlp_cookies(opts, cookies)
     with YoutubeDL(opts) as ydl:
         ydl.download([url])
     matches = sorted(video_dir.glob("source_audio.*"))

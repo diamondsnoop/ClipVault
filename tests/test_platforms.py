@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from clipvault.platforms import PLATFORMS, _flat_entry_url, identify_platform, platform_languages
 
 
@@ -138,3 +140,40 @@ def test_every_platform_has_languages():
     for name, config in PLATFORMS.items():
         assert config.get("languages"), f"{name} missing languages"
         assert isinstance(config["languages"], tuple)
+
+
+# ── Authenticated yt-dlp access ───────────────────────────────────────
+
+
+def test_extract_info_passes_cookies_to_ytdlp(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("clipvault.auth._cached_clipvault_cookie_path", None)
+    monkeypatch.setattr("clipvault.credentials.get_config_dir", lambda: tmp_path)
+    auth_toml = tmp_path / "auth.toml"
+    auth_toml.write_text('[bilibili]\nsessdata = "abc"\n', encoding="utf-8")
+
+    captured: dict[str, object] = {}
+
+    class FakeYoutubeDL:
+        def __init__(self, opts):
+            captured.update(opts)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def extract_info(self, url, download):
+            assert url == "https://www.bilibili.com/video/BV1xx"
+            assert download is False
+            return {"title": "T", "uploader": "U"}
+
+    monkeypatch.setattr("clipvault.platforms.YoutubeDL", FakeYoutubeDL)
+
+    from clipvault.platforms import extract_info
+
+    result = extract_info("https://www.bilibili.com/video/BV1xx", verbose=False, cookies=True)
+
+    assert result["title"] == "T"
+    assert isinstance(captured["cookiefile"], str)
+    assert Path(captured["cookiefile"]).is_file()

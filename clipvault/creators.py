@@ -228,6 +228,7 @@ def fetch_creator_videos(
     selector: str,
     limit: int,
     verbose: bool = False,
+    cookies: Path | str | None = None,
 ) -> dict[str, Any]:
     if limit < 1:
         raise ValueError("limit must be at least 1")
@@ -235,7 +236,7 @@ def fetch_creator_videos(
     registry = load_creator_registry(library)
     record = find_creator_source(library, selector)
     print(f"[creator] fetching: {record.get('name')} ({record.get('platform')})", file=sys.stderr)
-    entries = extract_creator_entries(str(record["source_url"]), limit=limit, verbose=verbose)
+    entries = extract_creator_entries(str(record["source_url"]), limit=limit, verbose=verbose, cookies=cookies)
     processed_ids, processed_urls = _processed_video_lookup(library)
     annotated_entries: list[dict[str, Any]] = []
     for entry in entries:
@@ -278,8 +279,9 @@ def enqueue_creator_videos(
     selector: str,
     limit: int,
     verbose: bool = False,
+    cookies: Path | str | None = None,
 ) -> dict[str, Any]:
-    preview = fetch_creator_videos(library, selector=selector, limit=limit, verbose=verbose)
+    preview = fetch_creator_videos(library, selector=selector, limit=limit, verbose=verbose, cookies=cookies)
     queue = load_job_queue(library)
     now = _now()
     jobs = queue.setdefault("jobs", [])

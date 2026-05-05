@@ -4,8 +4,10 @@ import json
 import re
 import sys
 import urllib.request
+from pathlib import Path
 from typing import Any
 
+from .auth import build_authenticated_opener
 from .models import SubtitleSegment
 from .platforms import platform_languages
 from .text import clean_text, strip_tags
@@ -26,6 +28,7 @@ def get_platform_subtitles(
     info: dict[str, Any],
     *,
     platform: str,
+    cookies: Path | str | None = None,
 ) -> tuple[list[SubtitleSegment], str]:
     priorities = platform_languages(platform)
     print(f"[subtitle] language priority: {', '.join(priorities)}", file=sys.stderr)
@@ -46,7 +49,7 @@ def get_platform_subtitles(
     tracks.sort(key=lambda item: (item[0], preferred_ext_rank(item[3].get("ext"))))
     for _, source_name, lang, entry in tracks:
         try:
-            raw = fetch_text(entry["url"])
+            raw = fetch_text(entry["url"], cookies=cookies)
             segments = parse_subtitle(raw, entry.get("ext") or "")
             if segments:
                 source_desc = f"{source_name}:{lang}:{entry.get('ext') or 'unknown'}"
@@ -73,9 +76,9 @@ def preferred_ext_rank(ext: str | None) -> int:
     return {"json": 0, "json3": 1, "vtt": 2, "srt": 3}.get((ext or "").lower(), 9)
 
 
-def fetch_text(url: str) -> str:
+def fetch_text(url: str, *, cookies: Path | str | None = None) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    opener = build_authenticated_opener(cookies)
     with opener.open(req, timeout=30) as response:  # noqa: S310 - user supplied subtitle URL
         return response.read().decode("utf-8", errors="replace")
 
@@ -165,4 +168,3 @@ def parse_time(value: str) -> float:
     else:
         return float(value)
     return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
-

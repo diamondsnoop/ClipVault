@@ -15,6 +15,14 @@ def test_top_level_help_discovers_subcommands():
     assert "library" in help_text
     assert "creator" in help_text
     assert "queue" in help_text
+    assert "auth" in help_text
+
+
+def test_auth_subcommand_not_normalized():
+    from clipvault.cli import _normalize_legacy_args
+
+    args = ["auth", "login", "--platform", "bilibili"]
+    assert _normalize_legacy_args(args) == args
 
 
 def test_legacy_video_args_are_normalized():
@@ -32,11 +40,34 @@ def test_global_library_before_subcommand_is_preserved():
     assert _normalize_legacy_args(args) == args
 
 
+def test_global_cookies_before_subcommand_is_preserved():
+    from clipvault.cli import _normalize_legacy_args
+
+    args = ["--cookies", "creator", "fetch", "闲木鱼"]
+    assert _normalize_legacy_args(args) == args
+
+
+def test_global_cookies_auto_auth_not_normalized():
+    from clipvault.cli import _normalize_legacy_args
+
+    args = ["--cookies", "auth", "list"]
+    assert _normalize_legacy_args(args) == args
+
+
+def test_global_cookies_bare_url_normalizes():
+    from clipvault.cli import _normalize_legacy_args
+
+    args = ["--cookies", "https://www.bilibili.com/video/BV1xx"]
+    result = _normalize_legacy_args(args)
+    assert result[0] == "video"
+    assert "--cookies" in result
+
+
 def test_process_video_with_series(tmp_path: Path, monkeypatch):
     """Verify --series flows into output path and manifest."""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/ffmpeg")
 
-    def fake_extract_info(url: str, *, verbose: bool):
+    def fake_extract_info(url: str, *, verbose: bool, cookies=None):
         return {
             "title": "Test Video",
             "uploader": "Test Creator",
@@ -53,7 +84,7 @@ def test_process_video_with_series(tmp_path: Path, monkeypatch):
     segments = [SubtitleSegment(0.0, 1.0, "hello")]
     monkeypatch.setattr(
         "clipvault.cli.get_platform_subtitles",
-        lambda info, platform: (segments, "subtitle:en:json3"),
+        lambda info, platform, cookies=None: (segments, "subtitle:en:json3"),
     )
 
     from clipvault.cli import process_video
@@ -90,7 +121,7 @@ def test_process_video_without_series(tmp_path: Path, monkeypatch):
     """Without --series, manifest has series: null and path is unchanged."""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/ffmpeg")
 
-    def fake_extract_info(url: str, *, verbose: bool):
+    def fake_extract_info(url: str, *, verbose: bool, cookies=None):
         return {
             "title": "Test Video",
             "uploader": "Test Creator",
@@ -102,7 +133,7 @@ def test_process_video_without_series(tmp_path: Path, monkeypatch):
     segments = [SubtitleSegment(0.0, 1.0, "hello")]
     monkeypatch.setattr(
         "clipvault.cli.get_platform_subtitles",
-        lambda info, platform: (segments, "subtitle:en:json3"),
+        lambda info, platform, cookies=None: (segments, "subtitle:en:json3"),
     )
 
     from clipvault.cli import process_video
@@ -126,16 +157,54 @@ def test_process_video_without_series(tmp_path: Path, monkeypatch):
     assert "Test Series" not in result["folder"]
 
 
+def test_process_video_passes_cookies_to_fetchers(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/ffmpeg")
+    seen: dict[str, object] = {}
+
+    def fake_extract_info(url: str, *, verbose: bool, cookies=None):
+        seen["metadata"] = cookies
+        return {
+            "title": "Test Video",
+            "uploader": "Test Creator",
+            "id": "test789",
+        }
+
+    def fake_get_subtitles(info, *, platform: str, cookies=None):
+        seen["subtitles"] = cookies
+        return [SubtitleSegment(0.0, 1.0, "hello")], "subtitle:zh-CN:json"
+
+    monkeypatch.setattr("clipvault.cli.extract_info", fake_extract_info)
+    monkeypatch.setattr("clipvault.cli.get_platform_subtitles", fake_get_subtitles)
+
+    from clipvault.cli import process_video
+
+    result = process_video(
+        url="https://www.bilibili.com/video/BV1xx",
+        library=tmp_path,
+        model_name="tiny",
+        device="cpu",
+        compute_type="int8",
+        force=True,
+        keep_audio=False,
+        verbose=False,
+        series=None,
+        cookies=True,
+    )
+
+    assert result["status"] == "ok"
+    assert seen == {"metadata": True, "subtitles": True}
+
+
 def test_process_video_stripped_series(tmp_path: Path, monkeypatch):
     """series=' Test Series ' is stripped, path uses 'Test Series', manifest writes 'Test Series'."""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/ffmpeg")
     monkeypatch.setattr(
         "clipvault.cli.extract_info",
-        lambda url, *, verbose: {"title": "T", "uploader": "U", "id": "id1"},
+        lambda url, *, verbose, cookies=None: {"title": "T", "uploader": "U", "id": "id1"},
     )
     monkeypatch.setattr(
         "clipvault.cli.get_platform_subtitles",
-        lambda info, platform: ([SubtitleSegment(0.0, 1.0, "h")], "subtitle:en:json3"),
+        lambda info, platform, cookies=None: ([SubtitleSegment(0.0, 1.0, "h")], "subtitle:en:json3"),
     )
 
     from clipvault.cli import process_video
@@ -157,11 +226,11 @@ def test_process_video_blank_series_equals_no_series(tmp_path: Path, monkeypatch
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/ffmpeg")
     monkeypatch.setattr(
         "clipvault.cli.extract_info",
-        lambda url, *, verbose: {"title": "T", "uploader": "U", "id": "id2"},
+        lambda url, *, verbose, cookies=None: {"title": "T", "uploader": "U", "id": "id2"},
     )
     monkeypatch.setattr(
         "clipvault.cli.get_platform_subtitles",
-        lambda info, platform: ([SubtitleSegment(0.0, 1.0, "h")], "subtitle:en:json3"),
+        lambda info, platform, cookies=None: ([SubtitleSegment(0.0, 1.0, "h")], "subtitle:en:json3"),
     )
 
     from clipvault.cli import process_video
@@ -184,11 +253,11 @@ def test_process_video_cache_hit_creates_index(tmp_path: Path, monkeypatch):
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/ffmpeg")
     monkeypatch.setattr(
         "clipvault.cli.extract_info",
-        lambda url, *, verbose: {"title": "T", "uploader": "U", "id": "vid1", "channel_id": "UCx"},
+        lambda url, *, verbose, cookies=None: {"title": "T", "uploader": "U", "id": "vid1", "channel_id": "UCx"},
     )
     monkeypatch.setattr(
         "clipvault.cli.get_platform_subtitles",
-        lambda info, platform: ([SubtitleSegment(0.0, 1.0, "h")], "subtitle:en:json3"),
+        lambda info, platform, cookies=None: ([SubtitleSegment(0.0, 1.0, "h")], "subtitle:en:json3"),
     )
 
     from clipvault.cli import process_video
@@ -241,11 +310,11 @@ def test_process_video_auto_series_via_rule(tmp_path: Path, monkeypatch):
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/ffmpeg")
     monkeypatch.setattr(
         "clipvault.cli.extract_info",
-        lambda url, *, verbose: {"title": "My Great Video", "uploader": "U", "id": "vid1"},
+        lambda url, *, verbose, cookies=None: {"title": "My Great Video", "uploader": "U", "id": "vid1"},
     )
     monkeypatch.setattr(
         "clipvault.cli.get_platform_subtitles",
-        lambda info, platform: ([SubtitleSegment(0.0, 1.0, "h")], "subtitle:en:json3"),
+        lambda info, platform, cookies=None: ([SubtitleSegment(0.0, 1.0, "h")], "subtitle:en:json3"),
     )
     monkeypatch.setattr(
         "clipvault.cli.resolve_series",
@@ -276,11 +345,11 @@ def test_process_video_manual_series_overrides_rule(tmp_path: Path, monkeypatch)
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/ffmpeg")
     monkeypatch.setattr(
         "clipvault.cli.extract_info",
-        lambda url, *, verbose: {"title": "My Great Video", "uploader": "U", "id": "vid2"},
+        lambda url, *, verbose, cookies=None: {"title": "My Great Video", "uploader": "U", "id": "vid2"},
     )
     monkeypatch.setattr(
         "clipvault.cli.get_platform_subtitles",
-        lambda info, platform: ([SubtitleSegment(0.0, 1.0, "h")], "subtitle:en:json3"),
+        lambda info, platform, cookies=None: ([SubtitleSegment(0.0, 1.0, "h")], "subtitle:en:json3"),
     )
     # resolve_series should be called with explicit_series="Manual" and return manual
     monkeypatch.setattr(
@@ -308,11 +377,11 @@ def test_process_video_no_series_no_rules(tmp_path: Path, monkeypatch):
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/ffmpeg")
     monkeypatch.setattr(
         "clipvault.cli.extract_info",
-        lambda url, *, verbose: {"title": "Plain Video", "uploader": "U", "id": "vid3"},
+        lambda url, *, verbose, cookies=None: {"title": "Plain Video", "uploader": "U", "id": "vid3"},
     )
     monkeypatch.setattr(
         "clipvault.cli.get_platform_subtitles",
-        lambda info, platform: ([SubtitleSegment(0.0, 1.0, "h")], "subtitle:en:json3"),
+        lambda info, platform, cookies=None: ([SubtitleSegment(0.0, 1.0, "h")], "subtitle:en:json3"),
     )
     monkeypatch.setattr(
         "clipvault.cli.resolve_series",
@@ -340,11 +409,11 @@ def test_process_video_cache_hit_auto_series(tmp_path: Path, monkeypatch):
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/ffmpeg")
     monkeypatch.setattr(
         "clipvault.cli.extract_info",
-        lambda url, *, verbose: {"title": "Cached Video", "uploader": "U", "id": "vid4"},
+        lambda url, *, verbose, cookies=None: {"title": "Cached Video", "uploader": "U", "id": "vid4"},
     )
     monkeypatch.setattr(
         "clipvault.cli.get_platform_subtitles",
-        lambda info, platform: ([SubtitleSegment(0.0, 1.0, "h")], "subtitle:en:json3"),
+        lambda info, platform, cookies=None: ([SubtitleSegment(0.0, 1.0, "h")], "subtitle:en:json3"),
     )
 
     auto_resolve = lambda library, *, platform, uploader, title, explicit_series: ("Auto Series", "rule")  # noqa: E731
@@ -482,7 +551,7 @@ def test_process_creator_fetch_command(tmp_path: Path, monkeypatch):
     ])
     monkeypatch.setattr(
         "clipvault.creators.extract_creator_entries",
-        lambda url, *, limit, verbose: [{"id": "v1", "title": "One", "url": "https://youtube.com/watch?v=v1"}],
+        lambda url, *, limit, verbose, cookies=None: [{"id": "v1", "title": "One", "url": "https://youtube.com/watch?v=v1"}],
     )
 
     result = process_creator_command(["fetch", "Jabzy", "--limit", "1", "--library", str(tmp_path)])
@@ -490,6 +559,36 @@ def test_process_creator_fetch_command(tmp_path: Path, monkeypatch):
     assert result["status"] == "ok"
     assert result["mode"] == "preview"
     assert result["count"] == 1
+
+
+def test_process_creator_fetch_command_passes_cookies(tmp_path: Path, monkeypatch):
+    from clipvault.cli import process_creator_command
+
+    process_creator_command([
+        "add",
+        "https://www.bilibili.com/video/BV1xx",
+        "--name",
+        "Bili",
+        "--library",
+        str(tmp_path),
+    ])
+    seen: dict[str, object] = {}
+
+    def fake_extract_creator_entries(url, *, limit, verbose, cookies=None):
+        seen["cookies"] = cookies
+        return [{"id": "BV1", "title": "One", "url": "https://www.bilibili.com/video/BV1"}]
+
+    monkeypatch.setattr("clipvault.creators.extract_creator_entries", fake_extract_creator_entries)
+
+    result = process_creator_command([
+        "fetch", "Bili",
+        "--limit", "1",
+        "--library", str(tmp_path),
+        "--cookies",
+    ])
+
+    assert result["status"] == "ok"
+    assert seen["cookies"] is True
 
 
 def test_process_creator_enqueue_command(tmp_path: Path, monkeypatch):
@@ -505,7 +604,7 @@ def test_process_creator_enqueue_command(tmp_path: Path, monkeypatch):
     ])
     monkeypatch.setattr(
         "clipvault.creators.extract_creator_entries",
-        lambda url, *, limit, verbose: [{"id": "v1", "title": "One", "url": "https://youtube.com/watch?v=v1"}],
+        lambda url, *, limit, verbose, cookies=None: [{"id": "v1", "title": "One", "url": "https://youtube.com/watch?v=v1"}],
     )
 
     result = process_creator_command(["enqueue", "Jabzy", "--limit", "1", "--library", str(tmp_path)])
@@ -568,6 +667,37 @@ def test_process_queue_run_command(tmp_path: Path, monkeypatch):
     queue = load_job_queue(tmp_path)
     assert queue["jobs"][0]["status"] == "done"
     assert queue["jobs"][0]["result"]["source"] == "subtitle:en:json3"
+
+
+def test_process_queue_run_passes_cookies(tmp_path: Path, monkeypatch):
+    from clipvault.cli import process_queue_command
+    from clipvault.creators import write_job_queue
+
+    write_job_queue(
+        tmp_path,
+        {
+            "jobs": [
+                {"id": "one", "status": "pending", "source_url": "https://www.bilibili.com/video/BV1"},
+            ],
+        },
+    )
+    seen: dict[str, object] = {}
+
+    def fake_process_video(**kwargs):
+        seen["cookies"] = kwargs.get("cookies")
+        return {
+            "status": "ok",
+            "folder": str(tmp_path / "out"),
+            "markdown": str(tmp_path / "out" / "transcript.md"),
+            "source": "subtitle:zh-CN:json",
+        }
+
+    monkeypatch.setattr("clipvault.cli.process_video", fake_process_video)
+
+    result = process_queue_command(["run", "--library", str(tmp_path), "--cookies"])
+
+    assert result["succeeded_count"] == 1
+    assert seen["cookies"] is True
 
 
 def test_process_queue_run_records_failure(tmp_path: Path, monkeypatch):

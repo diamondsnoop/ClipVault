@@ -253,7 +253,7 @@ def test_get_platform_subtitles_priority(monkeypatch):
     zh_json = json.dumps({"body": [{"from": 0.0, "to": 1.0, "content": "中文"}]})
     en_json = json.dumps({"body": [{"from": 0.0, "to": 1.0, "content": "english"}]})
 
-    def _fake_subtitle_map(url: str) -> str:
+    def _fake_subtitle_map(url: str, *, cookies=None) -> str:
         if "lang=zh-Hans" in url:
             return zh_json
         if "lang=en" in url:
@@ -281,7 +281,7 @@ def test_get_platform_subtitles_youtube_prefers_en(monkeypatch):
     zh_json = json.dumps({"body": [{"from": 0.0, "to": 1.0, "content": "中文"}]})
     en_json = json.dumps({"body": [{"from": 0.0, "to": 1.0, "content": "english"}]})
 
-    def _fake_fetch(url: str) -> str:
+    def _fake_fetch(url: str, *, cookies=None) -> str:
         if "lang=en" in url:
             return en_json
         return zh_json
@@ -307,7 +307,7 @@ def test_get_platform_subtitles_ext_priority(monkeypatch):
     json3_data = json.dumps({"body": [{"from": 0.0, "to": 1.0, "content": "json3"}]})
     vtt_data = "WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nvtt"
 
-    def _fake_fetch(url: str) -> str:
+    def _fake_fetch(url: str, *, cookies=None) -> str:
         if "ext=json3" in url:
             return json3_data
         return vtt_data
@@ -327,6 +327,31 @@ def test_get_platform_subtitles_ext_priority(monkeypatch):
     segments, source = S.get_platform_subtitles(info, platform="youtube")
     assert len(segments) == 1
     assert "json3" in segments[0].text
+
+
+def test_get_platform_subtitles_passes_cookies(monkeypatch):
+    seen: dict[str, object] = {}
+    raw = json.dumps({"body": [{"from": 0.0, "to": 1.0, "content": "ok"}]})
+
+    def _fake_fetch(url: str, *, cookies=None) -> str:
+        seen["cookies"] = cookies
+        return raw
+
+    import clipvault.subtitles as S
+    monkeypatch.setattr(S, "fetch_text", _fake_fetch)
+
+    info = {
+        "subtitles": {
+            "zh-CN": [{"url": "http://example.com/sub?lang=zh-CN", "ext": "json"}],
+        },
+        "automatic_captions": {},
+    }
+
+    segments, source = S.get_platform_subtitles(info, platform="bilibili", cookies=True)
+
+    assert len(segments) == 1
+    assert source == "subtitle:zh-CN:json"
+    assert seen["cookies"] is True
 
 
 def test_get_platform_subtitles_no_subtitles(monkeypatch):

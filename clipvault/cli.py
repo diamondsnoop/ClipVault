@@ -8,6 +8,12 @@ from pathlib import Path
 from typing import Any
 
 from .asr import resolve_device, transcribe_audio
+from .credentials import (
+    PLATFORM_CREDENTIAL_KEYS,
+    list_credentials,
+    remove_credential,
+    store_credential,
+)
 from .creators import (
     add_creator_source,
     enqueue_creator_videos,
@@ -31,13 +37,14 @@ from .library import (
     video_directory,
     write_json,
 )
+from .login import login_bilibili
 from .platforms import download_audio, extract_info
 from .series_rules import resolve_series
 from .subtitles import get_platform_subtitles
 
 
 DEFAULT_LIBRARY = Path.cwd() / "library"
-TOP_LEVEL_COMMANDS = {"video", "library", "creator", "queue"}
+TOP_LEVEL_COMMANDS = {"video", "library", "creator", "queue", "auth"}
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -60,16 +67,27 @@ def build_parser() -> argparse.ArgumentParser:
         description="Local-first video transcript vault.",
     )
     _add_library_option(parser)
+    _add_cookies_option(parser)
     subparsers = parser.add_subparsers(dest="command", required=True)
     _add_video_parser(subparsers)
     _add_library_parser(subparsers)
     _add_creator_parser(subparsers)
     _add_queue_parser(subparsers)
+    _add_auth_parser(subparsers)
     return parser
 
 
 def _add_library_option(parser: argparse.ArgumentParser, *, default: Any = DEFAULT_LIBRARY) -> None:
     parser.add_argument("--library", type=Path, default=default, help="Subtitle library root.")
+
+
+def _add_cookies_option(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--cookies",
+        action="store_true",
+        default=False,
+        help="Use stored platform credentials for authenticated access.",
+    )
 
 
 def _add_video_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -80,6 +98,7 @@ def _add_video_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPa
     )
     parser.add_argument("url", help="Video URL (Bilibili, YouTube, etc.).")
     _add_library_option(parser, default=argparse.SUPPRESS)
+    _add_cookies_option(parser)
     parser.add_argument("--model", default="small", help="faster-whisper model size/name. Default: small.")
     parser.add_argument(
         "--device",
@@ -128,6 +147,7 @@ def _add_creator_parser(subparsers: argparse._SubParsersAction[argparse.Argument
     fetch_parser = creator_subparsers.add_parser("fetch", help="Fetch recent video entries for a recorded creator.")
     fetch_parser.add_argument("selector", help="Creator id, name, or source URL.")
     _add_library_option(fetch_parser, default=argparse.SUPPRESS)
+    _add_cookies_option(fetch_parser)
     fetch_parser.add_argument("--limit", type=int, default=20, help="Maximum entries to fetch. Default: 20.")
     fetch_parser.add_argument("--verbose", "-v", action="store_true", help="Show yt-dlp logs.")
     fetch_parser.set_defaults(handler=_run_creator_fetch)
@@ -135,6 +155,7 @@ def _add_creator_parser(subparsers: argparse._SubParsersAction[argparse.Argument
     enqueue_parser = creator_subparsers.add_parser("enqueue", help="Add new creator entries to the local transcript job queue.")
     enqueue_parser.add_argument("selector", help="Creator id, name, or source URL.")
     _add_library_option(enqueue_parser, default=argparse.SUPPRESS)
+    _add_cookies_option(enqueue_parser)
     enqueue_parser.add_argument("--limit", type=int, default=20, help="Maximum entries to inspect. Default: 20.")
     enqueue_parser.add_argument("--verbose", "-v", action="store_true", help="Show yt-dlp logs.")
     enqueue_parser.set_defaults(handler=_run_creator_enqueue)
@@ -155,6 +176,7 @@ def _add_queue_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPa
 
     run_parser = queue_subparsers.add_parser("run", help="Run pending transcript jobs.")
     _add_library_option(run_parser, default=argparse.SUPPRESS)
+    _add_cookies_option(run_parser)
     run_parser.add_argument("--limit", type=int, default=1, help="Maximum jobs to run. Default: 1.")
     run_parser.add_argument("--retry-failed", action="store_true", help="Run failed jobs as well as pending jobs.")
     run_parser.add_argument("--model", default="small", help="faster-whisper model size/name. Default: small.")
@@ -175,11 +197,22 @@ def _normalize_legacy_args(args: list[str]) -> list[str]:
         return args
     if args[0] in {"-h", "--help"}:
         return args
-    if args[0] == "--library" and len(args) >= 3 and args[2] in TOP_LEVEL_COMMANDS:
+    if _leading_global_option_before_subcommand(args, "--library"):
         return args
-    if args[0].startswith("--library=") and len(args) >= 2 and args[1] in TOP_LEVEL_COMMANDS:
-        return args
+    if args[0] == "--cookies":
+        # --cookies is a flag (doesn't consume next arg), subcommand at args[1]
+        if len(args) >= 2 and args[1] in TOP_LEVEL_COMMANDS:
+            return args
+        return ["video", *args]
     return ["video", *args]
+
+
+def _leading_global_option_before_subcommand(args: list[str], option: str) -> bool:
+    if args[0] == option and len(args) >= 3 and args[2] in TOP_LEVEL_COMMANDS:
+        return True
+    if args[0].startswith(f"{option}=") and len(args) >= 2 and args[1] in TOP_LEVEL_COMMANDS:
+        return True
+    return False
 
 
 def run_parsed_args(args: argparse.Namespace) -> dict[str, Any]:
@@ -201,6 +234,84 @@ def process_queue_command(argv: list[str] | None = None) -> dict[str, Any]:
     return run_parsed_args(args)
 
 
+def _add_auth_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subparsers.add_parser(
+        "auth",
+        help="Manage platform credentials.",
+    )
+    auth_subparsers = parser.add_subparsers(dest="auth_command", required=True)
+
+    login = auth_subparsers.add_parser(
+        "login",
+        help="Log in to a platform (QR code or manual cookie entry).",
+    )
+    login.add_argument(
+        "--platform", "-p",
+        nargs="?",
+        default="bilibili",
+        choices=tuple(PLATFORM_CREDENTIAL_KEYS),
+        help="Target platform. Default: bilibili (QR code login).",
+    )
+    login.add_argument("--mode", choices=("terminal", "web"), default="terminal",
+                       help="QR code display mode (terminal blocks or browser). Default: terminal.")
+    login.add_argument("--sessdata", type=str, default=None, help="Bilibili SESSDATA cookie.")
+    login.add_argument("--bili-jct", type=str, default=None, help="Bilibili bili_jct cookie.")
+    login.add_argument("--session", type=str, default=None, help="Douyin session cookie.")
+    login.set_defaults(handler=_run_auth_login)
+
+    auth_subparsers.add_parser("list", help="Show stored credential keys by platform.").set_defaults(
+        handler=_run_auth_list
+    )
+
+    logout = auth_subparsers.add_parser("logout", help="Remove credentials for a platform.")
+    logout.add_argument(
+        "--platform", "-p",
+        required=True,
+        choices=tuple(PLATFORM_CREDENTIAL_KEYS),
+        help="Platform to remove credentials for.",
+    )
+    logout.set_defaults(handler=_run_auth_logout)
+
+
+def _run_auth_login(args: argparse.Namespace) -> dict[str, Any]:
+    # Check if any manual cookie values were provided
+    manual_keys = [k for k in PLATFORM_CREDENTIAL_KEYS[args.platform] if getattr(args, k, None)]
+
+    if manual_keys:
+        # Manual mode: store provided credentials directly
+        creds: dict[str, str] = {}
+        for key in manual_keys:
+            val = getattr(args, key, None)
+            if val:
+                creds[key] = val
+        path = store_credential(args.platform, **creds)
+        return {"status": "ok", "platform": args.platform, "keys": list(creds), "path": str(path)}
+
+    # Auto mode: QR code login (only supported for bilibili)
+    if args.platform == "bilibili":
+        return login_bilibili(mode=args.mode)
+
+    # For other platforms without QR support, show usage
+    known_keys = PLATFORM_CREDENTIAL_KEYS[args.platform]
+    return {
+        "status": "error",
+        "message": f"No values provided and QR login is not yet supported for '{args.platform}'. "
+                   f"Usage: clipvault auth login --platform {args.platform} "
+                   f"{' '.join(f'--{k}' for k in known_keys)}",
+    }
+
+
+def _run_auth_list(args: argparse.Namespace) -> dict[str, Any]:
+    return {"status": "ok", "credentials": list_credentials()}
+
+
+def _run_auth_logout(args: argparse.Namespace) -> dict[str, Any]:
+    removed = remove_credential(args.platform)
+    if not removed:
+        return {"status": "error", "message": f"No credentials found for platform '{args.platform}'."}
+    return {"status": "ok", "platform": args.platform}
+
+
 def _run_video_command(args: argparse.Namespace) -> dict[str, Any]:
     return process_video(
         url=args.url,
@@ -212,6 +323,7 @@ def _run_video_command(args: argparse.Namespace) -> dict[str, Any]:
         keep_audio=args.keep_audio,
         verbose=args.verbose,
         series=args.series,
+        cookies=args.cookies,
     )
 
 
@@ -234,6 +346,7 @@ def _run_creator_fetch(args: argparse.Namespace) -> dict[str, Any]:
         selector=args.selector,
         limit=args.limit,
         verbose=args.verbose,
+        cookies=args.cookies,
     )
 
 
@@ -243,6 +356,7 @@ def _run_creator_enqueue(args: argparse.Namespace) -> dict[str, Any]:
         selector=args.selector,
         limit=args.limit,
         verbose=args.verbose,
+        cookies=args.cookies,
     )
 
 
@@ -288,6 +402,7 @@ def _run_queue_run(args: argparse.Namespace) -> dict[str, Any]:
                 keep_audio=args.keep_audio,
                 verbose=args.verbose,
                 series=None,
+                cookies=args.cookies,
             )
         except Exception as exc:  # noqa: BLE001 - per-job failure should be recorded
             job["status"] = "failed"
@@ -327,12 +442,13 @@ def process_video(
     keep_audio: bool,
     verbose: bool,
     series: str | None = None,
+    cookies: Path | str | None = None,
 ) -> dict[str, Any]:
     if not shutil.which("ffmpeg"):
         raise RuntimeError("ffmpeg is not available in PATH.")
 
     print(f"[pipeline] processing {url}", file=sys.stderr)
-    info = extract_info(url, verbose=verbose)
+    info = extract_info(url, verbose=verbose, cookies=cookies)
     title = first_text(info, "title", default="untitled")
     uploader = first_text(info, "uploader", "channel", "creator", default="unknown-uploader")
     video_id = first_text(info, "id", "display_id", default="unknown-id")
@@ -378,10 +494,10 @@ def process_video(
     manifest = build_manifest(info, url=url, title=title, uploader=uploader, video_id=video_id, series=series)
     write_json(video_dir / "manifest.json", manifest)
 
-    segments, source = get_platform_subtitles(info, platform=platform)
+    segments, source = get_platform_subtitles(info, platform=platform, cookies=cookies)
     if not segments:
         print("[pipeline] no subtitles found, falling back to ASR", file=sys.stderr)
-        audio_path = download_audio(url, video_dir, verbose=verbose)
+        audio_path = download_audio(url, video_dir, verbose=verbose, cookies=cookies)
         segments = transcribe_audio(audio_path, model_name=model_name, device=device, compute_type=compute_type)
         source = "asr:faster-whisper"
         if not keep_audio:

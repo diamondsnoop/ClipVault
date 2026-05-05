@@ -49,6 +49,38 @@ Or call the module directly:
 .\.venv\Scripts\python.exe -m clipvault "https://www.bilibili.com/video/BV..."
 ```
 
+## Bilibili Login Cookies
+
+Some Bilibili videos, subtitles, creator pages, or higher-quality media may
+require a logged-in session. ClipVault supports a local Netscape-format
+`cookies.txt` file through `--cookies`.
+
+Recommended local layout:
+
+```powershell
+mkdir .secrets
+# Export browser cookies in Netscape cookies.txt format, then save as:
+# .secrets\bilibili-cookies.txt
+```
+
+Use it for one video:
+
+```powershell
+.\clipvault.ps1 "https://www.bilibili.com/video/BV..." --cookies ".secrets\bilibili-cookies.txt"
+```
+
+Use it for creator fetch/enqueue and queue execution:
+
+```powershell
+.\clipvault.ps1 creator fetch "闲木鱼" --cookies ".secrets\bilibili-cookies.txt"
+.\clipvault.ps1 creator enqueue "闲木鱼" --cookies ".secrets\bilibili-cookies.txt"
+.\clipvault.ps1 queue run --limit 1 --cookies ".secrets\bilibili-cookies.txt"
+```
+
+Cookie files contain account login state. Do not share them, paste them into
+issue reports, or commit them. `.secrets/`, `cookies.txt`, and `*.cookies.txt`
+are ignored by git.
+
 ## Windows NVIDIA GPU
 
 ClipVault defaults to `--device auto`, which prefers CUDA when CTranslate2 can use it. For Windows NVIDIA GPU support without installing the full CUDA Toolkit, install the optional runtime wheels:
@@ -118,6 +150,9 @@ If index files are deleted, stale, or inconsistent, rebuild them from existing c
 # Assign a video to a series (groups videos under a series folder)
 .\clipvault.ps1 "https://www.bilibili.com/video/BV..." --series "睡前消息"
 
+# Use Bilibili login cookies when metadata/subtitles require a logged-in session
+.\clipvault.ps1 "https://www.bilibili.com/video/BV..." --cookies ".secrets\bilibili-cookies.txt"
+
 # Use a smaller ASR model
 .\clipvault.ps1 "https://www.bilibili.com/video/BV..." --model tiny
 
@@ -140,6 +175,10 @@ If index files are deleted, stale, or inconsistent, rebuild them from existing c
 .\clipvault.ps1 queue status
 .\clipvault.ps1 queue list
 .\clipvault.ps1 queue run --limit 1
+
+# Authenticated creator and queue workflows
+.\clipvault.ps1 creator fetch "闲木鱼" --cookies ".secrets\bilibili-cookies.txt"
+.\clipvault.ps1 queue run --limit 1 --cookies ".secrets\bilibili-cookies.txt"
 ```
 
 ## Auto Series Rules
@@ -226,6 +265,9 @@ failed jobs.
 Do not commit generated data or local runtime folders:
 
 - `.venv/`
+- `.secrets/`
+- `cookies.txt`
+- `*.cookies.txt`
 - `library/`
 - model caches
 - runtime logs

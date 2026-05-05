@@ -99,7 +99,7 @@ def test_find_creator_source_by_id_name_and_url(tmp_path: Path):
 def test_fetch_creator_videos_preview_updates_checked_at(tmp_path: Path, monkeypatch):
     add_creator_source(tmp_path, source_url="https://www.youtube.com/@Jabzy", name="Jabzy")
 
-    def fake_extract_creator_entries(url: str, *, limit: int, verbose: bool):
+    def fake_extract_creator_entries(url: str, *, limit: int, verbose: bool, cookies=None):
         assert url == "https://www.youtube.com/@Jabzy"
         assert limit == 2
         assert verbose is False
@@ -146,7 +146,7 @@ def test_fetch_creator_videos_marks_processed_entries(tmp_path: Path, monkeypatc
 
     monkeypatch.setattr(
         "clipvault.creators.extract_creator_entries",
-        lambda url, *, limit, verbose: [
+        lambda url, *, limit, verbose, cookies=None: [
             {"id": "v1", "title": "One", "url": "https://youtube.com/watch?v=v1"},
             {"id": "v2", "title": "Two", "url": "https://youtube.com/watch?v=v2"},
         ],
@@ -183,7 +183,7 @@ def test_fetch_creator_videos_uses_creator_index_for_processed_lookup(tmp_path: 
     )
     monkeypatch.setattr(
         "clipvault.creators.extract_creator_entries",
-        lambda url, *, limit, verbose: [
+        lambda url, *, limit, verbose, cookies=None: [
             {"id": "v1", "title": "One", "url": "https://youtube.com/watch?v=v1"},
             {"id": "v2", "title": "Two", "url": "https://youtube.com/watch?v=v2"},
         ],
@@ -206,7 +206,7 @@ def test_enqueue_creator_videos_adds_new_entries(tmp_path: Path, monkeypatch):
     add_creator_source(tmp_path, source_url="https://www.youtube.com/@Jabzy", name="Jabzy")
     monkeypatch.setattr(
         "clipvault.creators.extract_creator_entries",
-        lambda url, *, limit, verbose: [
+        lambda url, *, limit, verbose, cookies=None: [
             {"id": "v1", "title": "One", "url": "https://youtube.com/watch?v=v1"},
             {"id": "v2", "title": "Two", "url": "https://youtube.com/watch?v=v2"},
         ],
@@ -248,7 +248,7 @@ def test_enqueue_creator_videos_skips_processed_and_existing(tmp_path: Path, mon
     (video_dir / "transcript.md").write_text("", encoding="utf-8")
     monkeypatch.setattr(
         "clipvault.creators.extract_creator_entries",
-        lambda url, *, limit, verbose: [
+        lambda url, *, limit, verbose, cookies=None: [
             {"id": "v1", "title": "One", "url": "https://youtube.com/watch?v=v1"},
             {"id": "v2", "title": "Two", "url": "https://youtube.com/watch?v=v2"},
         ],

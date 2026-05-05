@@ -7,3 +7,6 @@ __pycache__/
 vendor/wheels/
 library/
 pip-*.log
+.secrets/
+cookies.txt
+*.cookies.txt
