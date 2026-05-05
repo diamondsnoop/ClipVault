@@ -159,6 +159,42 @@ def test_fetch_creator_videos_marks_processed_entries(tmp_path: Path, monkeypatc
     assert [entry["library_status"] for entry in result["entries"]] == ["processed", "new"]
 
 
+def test_fetch_creator_videos_uses_creator_index_for_processed_lookup(tmp_path: Path, monkeypatch, capsys):
+    from clipvault.library import creator_index_path, write_json
+
+    add_creator_source(tmp_path, source_url="https://www.youtube.com/@Jabzy", name="Jabzy")
+    index_path = creator_index_path(tmp_path, platform="youtube", uploader="Jabzy")
+    index_path.parent.mkdir(parents=True)
+    write_json(
+        index_path,
+        {
+            "schema_version": 1,
+            "type": "creator",
+            "platform": "youtube",
+            "creator": "Jabzy",
+            "videos": [
+                {
+                    "video_id": "v1",
+                    "title": "One",
+                    "source_url": "https://youtube.com/watch?v=v1",
+                },
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        "clipvault.creators.extract_creator_entries",
+        lambda url, *, limit, verbose: [
+            {"id": "v1", "title": "One", "url": "https://youtube.com/watch?v=v1"},
+            {"id": "v2", "title": "Two", "url": "https://youtube.com/watch?v=v2"},
+        ],
+    )
+
+    result = fetch_creator_videos(tmp_path, selector="Jabzy", limit=2)
+
+    assert [entry["library_status"] for entry in result["entries"]] == ["processed", "new"]
+    assert "processed lookup: indexes" in capsys.readouterr().err
+
+
 def test_fetch_creator_videos_rejects_bad_limit(tmp_path: Path):
     add_creator_source(tmp_path, source_url="https://www.youtube.com/@Jabzy", name="Jabzy")
 

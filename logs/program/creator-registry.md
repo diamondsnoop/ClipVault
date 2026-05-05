@@ -14,6 +14,12 @@ Use these prefixes:
 - `[creator] discovered: <count>` — recent-entry discovery completed.
 - `[creator] candidates: <new> new, <processed> processed` — discovered
   entries were compared with completed local manifests.
+- `[creator] processed lookup: indexes` — processed status was read from
+  creator `_index.json` files.
+- `[creator] processed lookup: manifests` — processed status fell back to a
+  manifest scan because no creator indexes were available.
+- `[creator] index lookup skipped (<path>): <reason>` — one index file could
+  not be used for processed-status lookup.
 - `[creator] registry: <path>` — registry file path after a write.
 - `[creator] registry load failed (<path>): <reason>` — registry JSON could not
   be read.

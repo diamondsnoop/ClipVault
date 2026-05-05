@@ -168,6 +168,38 @@ def find_creator_source(library: Path, selector: str) -> dict[str, Any]:
 
 
 def _processed_video_lookup(library: Path) -> tuple[set[str], set[str]]:
+    indexed_ids, indexed_urls = _processed_video_lookup_from_indexes(library)
+    if indexed_ids or indexed_urls:
+        print("[creator] processed lookup: indexes", file=sys.stderr)
+        return indexed_ids, indexed_urls
+    print("[creator] processed lookup: manifests", file=sys.stderr)
+    return _processed_video_lookup_from_manifests(library)
+
+
+def _processed_video_lookup_from_indexes(library: Path) -> tuple[set[str], set[str]]:
+    video_ids: set[str] = set()
+    urls: set[str] = set()
+    for index_path in library.glob("*/*/_index.json"):
+        try:
+            data = json.loads(index_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"[creator] index lookup skipped ({index_path}): {exc}", file=sys.stderr)
+            continue
+        if not isinstance(data, dict) or data.get("type") != "creator":
+            continue
+        for video in data.get("videos", []):
+            if not isinstance(video, dict):
+                continue
+            video_id = video.get("video_id")
+            if video_id:
+                video_ids.add(str(video_id))
+            source_url = video.get("source_url")
+            if source_url:
+                urls.add(str(source_url).rstrip("/"))
+    return video_ids, urls
+
+
+def _processed_video_lookup_from_manifests(library: Path) -> tuple[set[str], set[str]]:
     video_ids: set[str] = set()
     urls: set[str] = set()
     for manifest_path in library.rglob("manifest.json"):
