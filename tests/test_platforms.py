@@ -82,11 +82,38 @@ def test_languages_unregistered():
 
 
 def test_flat_entry_url_prefers_webpage_url():
-    assert _flat_entry_url({"webpage_url": "https://example.com/v", "url": "abc"}) == "https://example.com/v"
+    assert _flat_entry_url(
+        {"webpage_url": "https://example.com/v", "url": "abc"},
+        source_url="https://www.youtube.com/@x",
+    ) == "https://example.com/v"
 
 
 def test_flat_entry_url_builds_youtube_url_from_id():
-    assert _flat_entry_url({"ie_key": "Youtube", "id": "abc", "url": "abc"}) == "https://www.youtube.com/watch?v=abc"
+    assert _flat_entry_url(
+        {"ie_key": "Youtube", "id": "abc", "url": "abc"},
+        source_url="https://www.youtube.com/@x",
+    ) == "https://www.youtube.com/watch?v=abc"
+
+
+def test_flat_entry_url_builds_bilibili_url_from_bv_id():
+    assert _flat_entry_url(
+        {"id": "BV123", "url": "BV123"},
+        source_url="https://space.bilibili.com/123/video",
+    ) == "https://www.bilibili.com/video/BV123"
+
+
+def test_flat_entry_url_builds_douyin_url_from_id():
+    assert _flat_entry_url(
+        {"id": "712345", "url": "712345"},
+        source_url="https://www.douyin.com/user/example",
+    ) == "https://www.douyin.com/video/712345"
+
+
+def test_flat_entry_url_joins_relative_path():
+    assert _flat_entry_url(
+        {"url": "/video/BV123"},
+        source_url="https://www.bilibili.com/account/history",
+    ) == "https://www.bilibili.com/video/BV123"
 
 
 # ── PLATFORMS registry shape ──────────────────────────────────────────

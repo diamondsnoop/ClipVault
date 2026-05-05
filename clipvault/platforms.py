@@ -66,14 +66,27 @@ def platform_languages(platform: str) -> tuple[str, ...]:
     return info["languages"] if info else ("en",)
 
 
-def _flat_entry_url(entry: dict[str, Any]) -> str | None:
+def _flat_entry_url(entry: dict[str, Any], *, source_url: str) -> str | None:
     video_url = entry.get("webpage_url") or entry.get("url")
     if isinstance(video_url, str) and urllib.parse.urlparse(video_url).scheme:
         return video_url
     video_id = entry.get("id")
-    if entry.get("ie_key") == "Youtube" and video_id:
+    platform = identify_platform(source_url)
+    if (entry.get("ie_key") == "Youtube" or platform == "youtube") and video_id:
         return f"https://www.youtube.com/watch?v={video_id}"
-    return video_url if isinstance(video_url, str) and video_url.strip() else None
+    if platform == "bilibili":
+        candidate = str(video_id or video_url or "").strip()
+        if candidate.startswith(("BV", "av")):
+            return f"https://www.bilibili.com/video/{candidate}"
+    if platform == "douyin":
+        candidate = str(video_id or video_url or "").strip()
+        if candidate and not candidate.startswith("/"):
+            return f"https://www.douyin.com/video/{candidate}"
+    if isinstance(video_url, str) and video_url.strip():
+        joined = urllib.parse.urljoin(source_url, video_url)
+        if urllib.parse.urlparse(joined).scheme:
+            return joined
+    return None
 
 
 def extract_info(url: str, *, verbose: bool) -> dict[str, Any]:
@@ -127,7 +140,7 @@ def extract_creator_entries(url: str, *, limit: int, verbose: bool) -> list[dict
     for entry in raw_entries:
         if not isinstance(entry, dict):
             continue
-        video_url = _flat_entry_url(entry)
+        video_url = _flat_entry_url(entry, source_url=url)
         if not video_url:
             continue
         entries.append({
