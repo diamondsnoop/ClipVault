@@ -161,6 +161,12 @@ Planned work:
 - Keep platform-specific hacks isolated in platform modules.
 - Do not overcommit to Douyin quality until extraction reliability is proven.
 
+Recent validation:
+
+- 2026-05-05: Bilibili 闲木鱼《大明王朝》single-video validation completed with
+  ASR fallback (`BV16G411973A`, 1290 segments, `small` model on CUDA). Platform
+  subtitles required login, so no-login validation correctly used ASR.
+
 Success criteria:
 
 - Bilibili and YouTube can both produce transcript outputs through the same CLI.
