@@ -37,6 +37,7 @@ from .library import (
     video_directory,
     write_json,
 )
+from .auth import clear_cookie_cache
 from .login import login_bilibili
 from .platforms import download_audio, extract_info
 from .series_rules import resolve_series
@@ -45,6 +46,7 @@ from .subtitles import get_platform_subtitles
 
 DEFAULT_LIBRARY = Path.cwd() / "library"
 TOP_LEVEL_COMMANDS = {"video", "library", "creator", "queue", "auth"}
+CLIPVAULT_AUTH_SENTINEL = "__clipvault_auth__"
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -57,6 +59,8 @@ def main(argv: list[str] | None = None) -> None:
     except Exception as exc:  # noqa: BLE001 - CLI should report cleanly
         print(f"[error] {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
+    finally:
+        clear_cookie_cache()
 
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
@@ -81,12 +85,13 @@ def _add_library_option(parser: argparse.ArgumentParser, *, default: Any = DEFAU
     parser.add_argument("--library", type=Path, default=default, help="Subtitle library root.")
 
 
-def _add_cookies_option(parser: argparse.ArgumentParser) -> None:
+def _add_cookies_option(parser: argparse.ArgumentParser, *, default: Any = None) -> None:
     parser.add_argument(
         "--cookies",
-        action="store_true",
-        default=False,
-        help="Use stored platform credentials for authenticated access.",
+        nargs="?",
+        const=CLIPVAULT_AUTH_SENTINEL,
+        default=default,
+        help="Path to Netscape cookies file, or use stored credentials (--cookies without value).",
     )
 
 
@@ -98,7 +103,7 @@ def _add_video_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPa
     )
     parser.add_argument("url", help="Video URL (Bilibili, YouTube, etc.).")
     _add_library_option(parser, default=argparse.SUPPRESS)
-    _add_cookies_option(parser)
+    _add_cookies_option(parser, default=argparse.SUPPRESS)
     parser.add_argument("--model", default="small", help="faster-whisper model size/name. Default: small.")
     parser.add_argument(
         "--device",
@@ -147,7 +152,7 @@ def _add_creator_parser(subparsers: argparse._SubParsersAction[argparse.Argument
     fetch_parser = creator_subparsers.add_parser("fetch", help="Fetch recent video entries for a recorded creator.")
     fetch_parser.add_argument("selector", help="Creator id, name, or source URL.")
     _add_library_option(fetch_parser, default=argparse.SUPPRESS)
-    _add_cookies_option(fetch_parser)
+    _add_cookies_option(fetch_parser, default=argparse.SUPPRESS)
     fetch_parser.add_argument("--limit", type=int, default=20, help="Maximum entries to fetch. Default: 20.")
     fetch_parser.add_argument("--verbose", "-v", action="store_true", help="Show yt-dlp logs.")
     fetch_parser.set_defaults(handler=_run_creator_fetch)
@@ -155,7 +160,7 @@ def _add_creator_parser(subparsers: argparse._SubParsersAction[argparse.Argument
     enqueue_parser = creator_subparsers.add_parser("enqueue", help="Add new creator entries to the local transcript job queue.")
     enqueue_parser.add_argument("selector", help="Creator id, name, or source URL.")
     _add_library_option(enqueue_parser, default=argparse.SUPPRESS)
-    _add_cookies_option(enqueue_parser)
+    _add_cookies_option(enqueue_parser, default=argparse.SUPPRESS)
     enqueue_parser.add_argument("--limit", type=int, default=20, help="Maximum entries to inspect. Default: 20.")
     enqueue_parser.add_argument("--verbose", "-v", action="store_true", help="Show yt-dlp logs.")
     enqueue_parser.set_defaults(handler=_run_creator_enqueue)
@@ -176,7 +181,7 @@ def _add_queue_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPa
 
     run_parser = queue_subparsers.add_parser("run", help="Run pending transcript jobs.")
     _add_library_option(run_parser, default=argparse.SUPPRESS)
-    _add_cookies_option(run_parser)
+    _add_cookies_option(run_parser, default=argparse.SUPPRESS)
     run_parser.add_argument("--limit", type=int, default=1, help="Maximum jobs to run. Default: 1.")
     run_parser.add_argument("--retry-failed", action="store_true", help="Run failed jobs as well as pending jobs.")
     run_parser.add_argument("--model", default="small", help="faster-whisper model size/name. Default: small.")
@@ -193,26 +198,79 @@ def _add_queue_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPa
 
 
 def _normalize_legacy_args(args: list[str]) -> list[str]:
+    args = _normalize_cookies_optional_values(args)
     if not args or args[0] in TOP_LEVEL_COMMANDS:
         return args
     if args[0] in {"-h", "--help"}:
         return args
-    if _leading_global_option_before_subcommand(args, "--library"):
+    command_index = _top_level_command_index_after_leading_globals(args)
+    if command_index is not None:
         return args
-    if args[0] == "--cookies":
-        # --cookies is a flag (doesn't consume next arg), subcommand at args[1]
-        if len(args) >= 2 and args[1] in TOP_LEVEL_COMMANDS:
-            return args
-        return ["video", *args]
-    return ["video", *args]
+    insert_at = _leading_global_options_end(args)
+    return [*args[:insert_at], "video", *args[insert_at:]]
 
 
-def _leading_global_option_before_subcommand(args: list[str], option: str) -> bool:
-    if args[0] == option and len(args) >= 3 and args[2] in TOP_LEVEL_COMMANDS:
-        return True
-    if args[0].startswith(f"{option}=") and len(args) >= 2 and args[1] in TOP_LEVEL_COMMANDS:
-        return True
-    return False
+def _normalize_cookies_optional_values(args: list[str]) -> list[str]:
+    normalized: list[str] = []
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token != "--cookies":
+            normalized.append(token)
+            index += 1
+            continue
+
+        next_token = args[index + 1] if index + 1 < len(args) else None
+        if (
+            next_token is None
+            or next_token.startswith("-")
+            or next_token in TOP_LEVEL_COMMANDS
+            or _looks_like_video_url(next_token)
+        ):
+            normalized.append(f"--cookies={CLIPVAULT_AUTH_SENTINEL}")
+            index += 1
+            continue
+
+        normalized.extend([token, next_token])
+        index += 2
+    return normalized
+
+
+def _looks_like_video_url(value: str) -> bool:
+    lower = value.lower()
+    return "://" in lower or lower.startswith(("www.", "bilibili.com/", "youtube.com/", "youtu.be/", "b23.tv/"))
+
+
+def _top_level_command_index_after_leading_globals(args: list[str]) -> int | None:
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token in TOP_LEVEL_COMMANDS:
+            return index
+        next_index = _consume_leading_global_option(args, index)
+        if next_index == index:
+            return None
+        index = next_index
+    return None
+
+
+def _leading_global_options_end(args: list[str]) -> int:
+    index = 0
+    while index < len(args):
+        next_index = _consume_leading_global_option(args, index)
+        if next_index == index:
+            return index
+        index = next_index
+    return index
+
+
+def _consume_leading_global_option(args: list[str], index: int) -> int:
+    token = args[index]
+    if token in {"--library", "--cookies"}:
+        return index + 2 if index + 1 < len(args) else index
+    if token.startswith("--library=") or token.startswith("--cookies="):
+        return index + 1
+    return index
 
 
 def run_parsed_args(args: argparse.Namespace) -> dict[str, Any]:
@@ -309,6 +367,7 @@ def _run_auth_logout(args: argparse.Namespace) -> dict[str, Any]:
     removed = remove_credential(args.platform)
     if not removed:
         return {"status": "error", "message": f"No credentials found for platform '{args.platform}'."}
+    clear_cookie_cache()
     return {"status": "ok", "platform": args.platform}
 
 

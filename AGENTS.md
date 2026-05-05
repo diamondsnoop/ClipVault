@@ -70,14 +70,15 @@ Creator source registry (Phase 5 Step 1):
 
 Authenticated platform access:
 
+- `--cookies` (no value) uses credentials from `clipvault auth login`.
 - `--cookies <path>` accepts a local Netscape-format `cookies.txt` file.
 - Cookies are passed to `yt-dlp` metadata extraction, creator fetches, audio
   downloads, and subtitle HTTP downloads.
 - Supported commands:
-  - `clipvault video <url> --cookies <path>`
-  - `clipvault creator fetch <selector> --cookies <path>`
-  - `clipvault creator enqueue <selector> --cookies <path>`
-  - `clipvault queue run --cookies <path>`
+  - `clipvault video <url> --cookies`
+  - `clipvault creator fetch <selector> --cookies`
+  - `clipvault creator enqueue <selector> --cookies`
+  - `clipvault queue run --cookies`
 - Cookie files are credentials. Never commit, log, paste, or expose their
   contents.
 
@@ -152,7 +153,14 @@ Group into a series:
 .\clipvault.ps1 "https://www.bilibili.com/video/BV..." --series "睡前消息"
 ```
 
-Use Bilibili login cookies:
+Use Bilibili login cookies (stored credentials):
+
+```powershell
+clipvault auth login
+.\clipvault.ps1 "https://www.bilibili.com/video/BV..." --cookies
+```
+
+Or with an explicit cookies file:
 
 ```powershell
 mkdir .secrets
@@ -201,8 +209,8 @@ Record and list creator/channel sources:
 .\clipvault.ps1 creator enqueue "Jabzy" --limit 10
 .\clipvault.ps1 queue status
 .\clipvault.ps1 queue run --limit 1
-.\clipvault.ps1 creator fetch "闲木鱼" --cookies ".secrets\bilibili-cookies.txt"
-.\clipvault.ps1 queue run --limit 1 --cookies ".secrets\bilibili-cookies.txt"
+.\clipvault.ps1 creator fetch "闲木鱼" --cookies
+.\clipvault.ps1 queue run --limit 1 --cookies
 ```
 
 ## Manual Platform Samples

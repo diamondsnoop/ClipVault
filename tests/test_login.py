@@ -10,6 +10,7 @@ from clipvault.login import (
     _generate_qr_login,
     _get_cookie_value,
     _poll_qr_login,
+    _show_qr_code,
     login_bilibili,
     validate_bilibili_session,
 )
@@ -53,6 +54,15 @@ class TestGenerateQR:
 
         with pytest.raises(RuntimeError, match="missing url or qrcode_key"):
             _generate_qr_login(mock_client)
+
+
+def test_show_qr_code_terminal_keeps_stdout_clean(capsys):
+    _show_qr_code("https://example.com/login", mode="terminal")
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Scan this QR code" in captured.err
+    assert "█" in captured.err
 
 
 class TestPollQR:

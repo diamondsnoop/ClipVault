@@ -5,6 +5,14 @@ from pathlib import Path
 
 from clipvault.subtitles import SubtitleSegment
 
+AUTH_SENTINEL = "__clipvault_auth__"
+
+
+def _parse_cli(raw_args: list[str]):
+    from clipvault.cli import _normalize_legacy_args, build_parser
+
+    return build_parser().parse_args(_normalize_legacy_args(raw_args))
+
 
 def test_top_level_help_discovers_subcommands():
     from clipvault.cli import build_parser
@@ -44,14 +52,32 @@ def test_global_cookies_before_subcommand_is_preserved():
     from clipvault.cli import _normalize_legacy_args
 
     args = ["--cookies", "creator", "fetch", "闲木鱼"]
-    assert _normalize_legacy_args(args) == args
+    assert _normalize_legacy_args(args) == ["--cookies=__clipvault_auth__", "creator", "fetch", "闲木鱼"]
+
+
+def test_global_cookies_before_subcommand_parses_as_stored_credentials():
+    args = _parse_cli(["--cookies", "creator", "fetch", "闲木鱼"])
+
+    assert args.command == "creator"
+    assert args.creator_command == "fetch"
+    assert args.selector == "闲木鱼"
+    assert args.cookies == AUTH_SENTINEL
+
+
+def test_global_cookies_path_before_subcommand_parses_as_cookie_file():
+    args = _parse_cli(["--cookies", ".secrets/bilibili-cookies.txt", "creator", "fetch", "闲木鱼"])
+
+    assert args.command == "creator"
+    assert args.creator_command == "fetch"
+    assert args.selector == "闲木鱼"
+    assert args.cookies == ".secrets/bilibili-cookies.txt"
 
 
 def test_global_cookies_auto_auth_not_normalized():
     from clipvault.cli import _normalize_legacy_args
 
     args = ["--cookies", "auth", "list"]
-    assert _normalize_legacy_args(args) == args
+    assert _normalize_legacy_args(args) == ["--cookies=__clipvault_auth__", "auth", "list"]
 
 
 def test_global_cookies_bare_url_normalizes():
@@ -59,8 +85,23 @@ def test_global_cookies_bare_url_normalizes():
 
     args = ["--cookies", "https://www.bilibili.com/video/BV1xx"]
     result = _normalize_legacy_args(args)
-    assert result[0] == "video"
-    assert "--cookies" in result
+    assert result == ["--cookies=__clipvault_auth__", "video", "https://www.bilibili.com/video/BV1xx"]
+
+
+def test_global_cookies_bare_url_parses_as_stored_credentials():
+    args = _parse_cli(["--cookies", "https://www.bilibili.com/video/BV1xx"])
+
+    assert args.command == "video"
+    assert args.url == "https://www.bilibili.com/video/BV1xx"
+    assert args.cookies == AUTH_SENTINEL
+
+
+def test_video_cookies_before_url_parses_as_stored_credentials():
+    args = _parse_cli(["video", "--cookies", "https://www.bilibili.com/video/BV1xx"])
+
+    assert args.command == "video"
+    assert args.url == "https://www.bilibili.com/video/BV1xx"
+    assert args.cookies == AUTH_SENTINEL
 
 
 def test_process_video_with_series(tmp_path: Path, monkeypatch):
@@ -588,7 +629,7 @@ def test_process_creator_fetch_command_passes_cookies(tmp_path: Path, monkeypatc
     ])
 
     assert result["status"] == "ok"
-    assert seen["cookies"] is True
+    assert seen["cookies"] == "__clipvault_auth__"
 
 
 def test_process_creator_enqueue_command(tmp_path: Path, monkeypatch):
@@ -697,7 +738,7 @@ def test_process_queue_run_passes_cookies(tmp_path: Path, monkeypatch):
     result = process_queue_command(["run", "--library", str(tmp_path), "--cookies"])
 
     assert result["succeeded_count"] == 1
-    assert seen["cookies"] is True
+    assert seen["cookies"] == "__clipvault_auth__"
 
 
 def test_process_queue_run_records_failure(tmp_path: Path, monkeypatch):

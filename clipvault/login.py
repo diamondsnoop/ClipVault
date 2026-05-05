@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 
+from .auth import clear_cookie_cache
 from .credentials import PLATFORM_CREDENTIAL_KEYS, remove_credential, store_credential
 
 QR_GENERATE_API = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
@@ -104,7 +105,7 @@ def _show_qr_code(url: str, mode: str = "terminal") -> None:
 
     # Terminal mode: render as block characters
     print("\nScan this QR code with the Bilibili app to log in:\n", file=sys.stderr)
-    qr.terminal(compact=True)
+    qr.terminal(out=sys.stderr, compact=True)
     print(file=sys.stderr)
 
 
@@ -230,8 +231,9 @@ def validate_bilibili_session(sessdata: str | None, bili_jct: str | None) -> dic
 
 
 def logout_bilibili() -> dict[str, Any]:
-    """Remove Bilibili credentials."""
+    """Remove Bilibili credentials and clear cached cookie file."""
     removed = remove_credential("bilibili")
     if not removed:
         return {"status": "error", "message": "No Bilibili credentials found."}
+    clear_cookie_cache()
     return {"status": "ok", "platform": "bilibili"}

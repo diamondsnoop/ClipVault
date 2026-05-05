@@ -52,28 +52,31 @@ Or call the module directly:
 ## Bilibili Login Cookies
 
 Some Bilibili videos, subtitles, creator pages, or higher-quality media may
-require a logged-in session. ClipVault supports a local Netscape-format
-`cookies.txt` file through `--cookies`.
+require a logged-in session. ClipVault provides two ways to use cookies:
 
-Recommended local layout:
+### Option 1: Login with QR code (recommended)
 
 ```powershell
-mkdir .secrets
-# Export browser cookies in Netscape cookies.txt format, then save as:
-# .secrets\bilibili-cookies.txt
+clipvault auth login
 ```
 
-Use it for one video:
+Scan the QR code with the Bilibili app. Credentials are stored in
+`%APPDATA%\clipvault\auth.toml`. Then pass `--cookies` without a value to use
+them:
+
+```powershell
+.\clipvault.ps1 "https://www.bilibili.com/video/BV..." --cookies
+.\clipvault.ps1 creator fetch "闲木鱼" --cookies
+.\clipvault.ps1 queue run --limit 1 --cookies
+```
+
+### Option 2: Manual cookies.txt file
+
+Export browser cookies in Netscape format and pass the path:
 
 ```powershell
 .\clipvault.ps1 "https://www.bilibili.com/video/BV..." --cookies ".secrets\bilibili-cookies.txt"
-```
-
-Use it for creator fetch/enqueue and queue execution:
-
-```powershell
 .\clipvault.ps1 creator fetch "闲木鱼" --cookies ".secrets\bilibili-cookies.txt"
-.\clipvault.ps1 creator enqueue "闲木鱼" --cookies ".secrets\bilibili-cookies.txt"
 .\clipvault.ps1 queue run --limit 1 --cookies ".secrets\bilibili-cookies.txt"
 ```
 
@@ -150,7 +153,10 @@ If index files are deleted, stale, or inconsistent, rebuild them from existing c
 # Assign a video to a series (groups videos under a series folder)
 .\clipvault.ps1 "https://www.bilibili.com/video/BV..." --series "睡前消息"
 
-# Use Bilibili login cookies when metadata/subtitles require a logged-in session
+# Use stored credentials for authenticated access
+.\clipvault.ps1 "https://www.bilibili.com/video/BV..." --cookies
+
+# Or use a specific cookies file
 .\clipvault.ps1 "https://www.bilibili.com/video/BV..." --cookies ".secrets\bilibili-cookies.txt"
 
 # Use a smaller ASR model
@@ -176,7 +182,11 @@ If index files are deleted, stale, or inconsistent, rebuild them from existing c
 .\clipvault.ps1 queue list
 .\clipvault.ps1 queue run --limit 1
 
-# Authenticated creator and queue workflows
+# Authenticated creator and queue workflows (with stored credentials)
+.\clipvault.ps1 creator fetch "闲木鱼" --cookies
+.\clipvault.ps1 queue run --limit 1 --cookies
+
+# Or with explicit cookies file
 .\clipvault.ps1 creator fetch "闲木鱼" --cookies ".secrets\bilibili-cookies.txt"
 .\clipvault.ps1 queue run --limit 1 --cookies ".secrets\bilibili-cookies.txt"
 ```
