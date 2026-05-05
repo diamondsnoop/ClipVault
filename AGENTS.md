@@ -184,9 +184,10 @@ Record and list creator/channel sources:
 
 Use these real-world samples when a development task needs manual or integration-style platform validation. Do not make normal unit tests depend on these links or creators; platform pages and subtitles can change.
 
-- Bilibili: 马督公《睡前消息》系列.
+- Bilibili primary: 闲木鱼《大明王朝》系列.
+- Bilibili secondary: 马督公《睡前消息》系列. Keep this sample available for later regression checks.
 - YouTube: Jabzy, `History of the Middle East` series.
-- Douyin: 王朝董事会《大明王朝》系列.
+- Douyin: 曾章见真章《曾章见真章创建的合集》系列.
 
 When testing with these samples, record the exact URL, date, whether subtitles were platform-provided or ASR-generated, output path, and any platform-specific failure in `logs/development/`.
 

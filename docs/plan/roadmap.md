@@ -59,9 +59,10 @@ Implemented as of the current baseline:
 
 Use these samples for manual and integration-style checks when validating platform behavior. They are intentionally not part of the default unit test suite because external platform content, subtitles, and access rules can change.
 
-- Bilibili: 马督公《睡前消息》系列.
+- Bilibili primary: 闲木鱼《大明王朝》系列.
+- Bilibili secondary: 马督公《睡前消息》系列. Keep this sample available for later regression checks.
 - YouTube: Jabzy, `History of the Middle East` series.
-- Douyin: 王朝董事会《大明王朝》系列.
+- Douyin: 曾章见真章《曾章见真章创建的合集》系列.
 
 For each manual validation, log the exact URL, date, transcript source, output path, and failure mode if any.
 

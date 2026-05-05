@@ -10,6 +10,8 @@ def test_identify_bilibili():
     assert identify_platform("https://www.bilibili.com/video/BV1xx") == "bilibili"
     assert identify_platform("https://b23.tv/abc123") == "bilibili"
     assert identify_platform("https://www.bilibili.com/read/cv123") == "bilibili"
+    assert identify_platform("https://space.bilibili.com/123456/video") == "bilibili"
+    assert identify_platform("https://www.bilibili.com/list/123456") == "bilibili"
     assert identify_platform("https://bilibili.com/video/BV1xx") == "bilibili"
 
 
@@ -100,6 +102,13 @@ def test_flat_entry_url_builds_bilibili_url_from_bv_id():
         {"id": "BV123", "url": "BV123"},
         source_url="https://space.bilibili.com/123/video",
     ) == "https://www.bilibili.com/video/BV123"
+
+
+def test_flat_entry_url_builds_bilibili_url_from_av_id():
+    assert _flat_entry_url(
+        {"id": "av987", "url": "av987"},
+        source_url="https://space.bilibili.com/123/video",
+    ) == "https://www.bilibili.com/video/av987"
 
 
 def test_flat_entry_url_builds_douyin_url_from_id():
