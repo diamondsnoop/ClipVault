@@ -28,25 +28,48 @@ from .subtitles import get_platform_subtitles
 
 
 DEFAULT_LIBRARY = Path.cwd() / "library"
+TOP_LEVEL_COMMANDS = {"video", "library", "creator"}
 
 
 def main(argv: list[str] | None = None) -> None:
     raw_args = sys.argv[1:] if argv is None else argv
-    if raw_args and raw_args[0] == "library":
-        result = process_library_command(raw_args[1:])
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        return
-    if raw_args and raw_args[0] == "creator":
-        result = process_creator_command(raw_args[1:])
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        return
+    parser = build_parser()
+    args = parser.parse_args(_normalize_legacy_args(raw_args))
 
+    try:
+        result = run_parsed_args(args)
+    except Exception as exc:  # noqa: BLE001 - CLI should report cleanly
+        print(f"[error] {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="clipvault",
+        description="Local-first video transcript vault.",
+    )
+    _add_library_option(parser)
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    _add_video_parser(subparsers)
+    _add_library_parser(subparsers)
+    _add_creator_parser(subparsers)
+    return parser
+
+
+def _add_library_option(parser: argparse.ArgumentParser, *, default: Any = DEFAULT_LIBRARY) -> None:
+    parser.add_argument("--library", type=Path, default=default, help="Subtitle library root.")
+
+
+def _add_video_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subparsers.add_parser(
+        "video",
+        help="Process one video URL.",
         description="Fetch video subtitles, or run ASR when subtitles are unavailable.",
     )
     parser.add_argument("url", help="Video URL (Bilibili, YouTube, etc.).")
-    parser.add_argument("--library", type=Path, default=DEFAULT_LIBRARY, help="Subtitle library root.")
+    _add_library_option(parser, default=argparse.SUPPRESS)
     parser.add_argument("--model", default="small", help="faster-whisper model size/name. Default: small.")
     parser.add_argument(
         "--device",
@@ -64,101 +87,118 @@ def main(argv: list[str] | None = None) -> None:
         default=None,
         help="Optional series name for library grouping.",
     )
-    args = parser.parse_args(raw_args)
-
-    try:
-        result = process_video(
-            url=args.url,
-            library=args.library,
-            model_name=args.model,
-            device=args.device,
-            compute_type=args.compute_type,
-            force=args.force,
-            keep_audio=args.keep_audio,
-            verbose=args.verbose,
-            series=args.series,
-        )
-    except Exception as exc:  # noqa: BLE001 - CLI should report cleanly
-        print(f"[error] {exc}", file=sys.stderr)
-        raise SystemExit(1) from exc
-
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    parser.set_defaults(handler=_run_video_command)
 
 
-def process_library_command(argv: list[str] | None = None) -> dict[str, Any]:
-    parser = argparse.ArgumentParser(
-        prog="clipvault library",
-        description="Maintain the local ClipVault library.",
-    )
-    subparsers = parser.add_subparsers(dest="command", required=True)
-    rebuild_parser = subparsers.add_parser(
+def _add_library_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subparsers.add_parser("library", help="Maintain the local transcript library.")
+    library_subparsers = parser.add_subparsers(dest="library_command", required=True)
+    rebuild_parser = library_subparsers.add_parser(
         "rebuild-index",
         help="Rebuild creator and series indexes from existing manifests.",
     )
-    rebuild_parser.add_argument("--library", type=Path, default=DEFAULT_LIBRARY, help="Subtitle library root.")
+    _add_library_option(rebuild_parser, default=argparse.SUPPRESS)
     rebuild_parser.add_argument("--dry-run", action="store_true", help="Report planned changes without writing indexes.")
+    rebuild_parser.set_defaults(handler=_run_library_rebuild_index)
 
-    args = parser.parse_args(argv)
-    if args.command == "rebuild-index":
-        try:
-            return rebuild_library_indexes(args.library, dry_run=args.dry_run)
-        except Exception as exc:  # noqa: BLE001 - CLI should report cleanly
-            print(f"[error] {exc}", file=sys.stderr)
-            raise SystemExit(1) from exc
-    raise SystemExit(2)
+
+def _add_creator_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subparsers.add_parser("creator", help="Manage followed creator sources.")
+    creator_subparsers = parser.add_subparsers(dest="creator_command", required=True)
+    add_parser = creator_subparsers.add_parser("add", help="Record a creator/channel source URL.")
+    add_parser.add_argument("url", help="Creator/channel URL to follow.")
+    _add_library_option(add_parser, default=argparse.SUPPRESS)
+    add_parser.add_argument("--name", type=str, default=None, help="Display name for this creator.")
+    add_parser.set_defaults(handler=_run_creator_add)
+
+    list_parser = creator_subparsers.add_parser("list", help="List recorded creator sources.")
+    _add_library_option(list_parser, default=argparse.SUPPRESS)
+    list_parser.set_defaults(handler=_run_creator_list)
+
+    fetch_parser = creator_subparsers.add_parser("fetch", help="Fetch recent video entries for a recorded creator.")
+    fetch_parser.add_argument("selector", help="Creator id, name, or source URL.")
+    _add_library_option(fetch_parser, default=argparse.SUPPRESS)
+    fetch_parser.add_argument("--limit", type=int, default=20, help="Maximum entries to fetch. Default: 20.")
+    fetch_parser.add_argument("--verbose", "-v", action="store_true", help="Show yt-dlp logs.")
+    fetch_parser.set_defaults(handler=_run_creator_fetch)
+
+    enqueue_parser = creator_subparsers.add_parser("enqueue", help="Add new creator entries to the local transcript job queue.")
+    enqueue_parser.add_argument("selector", help="Creator id, name, or source URL.")
+    _add_library_option(enqueue_parser, default=argparse.SUPPRESS)
+    enqueue_parser.add_argument("--limit", type=int, default=20, help="Maximum entries to inspect. Default: 20.")
+    enqueue_parser.add_argument("--verbose", "-v", action="store_true", help="Show yt-dlp logs.")
+    enqueue_parser.set_defaults(handler=_run_creator_enqueue)
+
+
+def _normalize_legacy_args(args: list[str]) -> list[str]:
+    if not args or args[0] in TOP_LEVEL_COMMANDS:
+        return args
+    if args[0] in {"-h", "--help"}:
+        return args
+    if args[0] == "--library" and len(args) >= 3 and args[2] in TOP_LEVEL_COMMANDS:
+        return args
+    if args[0].startswith("--library=") and len(args) >= 2 and args[1] in TOP_LEVEL_COMMANDS:
+        return args
+    return ["video", *args]
+
+
+def run_parsed_args(args: argparse.Namespace) -> dict[str, Any]:
+    return args.handler(args)
+
+
+def process_library_command(argv: list[str] | None = None) -> dict[str, Any]:
+    args = build_parser().parse_args(["library", *(argv or [])])
+    return run_parsed_args(args)
 
 
 def process_creator_command(argv: list[str] | None = None) -> dict[str, Any]:
-    parser = argparse.ArgumentParser(
-        prog="clipvault creator",
-        description="Manage followed creator sources.",
+    args = build_parser().parse_args(["creator", *(argv or [])])
+    return run_parsed_args(args)
+
+
+def _run_video_command(args: argparse.Namespace) -> dict[str, Any]:
+    return process_video(
+        url=args.url,
+        library=args.library,
+        model_name=args.model,
+        device=args.device,
+        compute_type=args.compute_type,
+        force=args.force,
+        keep_audio=args.keep_audio,
+        verbose=args.verbose,
+        series=args.series,
     )
-    subparsers = parser.add_subparsers(dest="command", required=True)
-    add_parser = subparsers.add_parser("add", help="Record a creator/channel source URL.")
-    add_parser.add_argument("url", help="Creator/channel URL to follow.")
-    add_parser.add_argument("--library", type=Path, default=DEFAULT_LIBRARY, help="Subtitle library root.")
-    add_parser.add_argument("--name", type=str, default=None, help="Display name for this creator.")
 
-    list_parser = subparsers.add_parser("list", help="List recorded creator sources.")
-    list_parser.add_argument("--library", type=Path, default=DEFAULT_LIBRARY, help="Subtitle library root.")
 
-    fetch_parser = subparsers.add_parser("fetch", help="Fetch recent video entries for a recorded creator.")
-    fetch_parser.add_argument("selector", help="Creator id, name, or source URL.")
-    fetch_parser.add_argument("--library", type=Path, default=DEFAULT_LIBRARY, help="Subtitle library root.")
-    fetch_parser.add_argument("--limit", type=int, default=20, help="Maximum entries to fetch. Default: 20.")
-    fetch_parser.add_argument("--verbose", "-v", action="store_true", help="Show yt-dlp logs.")
+def _run_library_rebuild_index(args: argparse.Namespace) -> dict[str, Any]:
+    return rebuild_library_indexes(args.library, dry_run=args.dry_run)
 
-    enqueue_parser = subparsers.add_parser("enqueue", help="Add new creator entries to the local transcript job queue.")
-    enqueue_parser.add_argument("selector", help="Creator id, name, or source URL.")
-    enqueue_parser.add_argument("--library", type=Path, default=DEFAULT_LIBRARY, help="Subtitle library root.")
-    enqueue_parser.add_argument("--limit", type=int, default=20, help="Maximum entries to inspect. Default: 20.")
-    enqueue_parser.add_argument("--verbose", "-v", action="store_true", help="Show yt-dlp logs.")
 
-    args = parser.parse_args(argv)
-    try:
-        if args.command == "add":
-            record = add_creator_source(args.library, source_url=args.url, name=args.name)
-            return {"status": "ok", "creator": record}
-        if args.command == "list":
-            return {"status": "ok", "creators": list_creator_sources(args.library)}
-        if args.command == "fetch":
-            return fetch_creator_videos(
-                args.library,
-                selector=args.selector,
-                limit=args.limit,
-                verbose=args.verbose,
-            )
-        if args.command == "enqueue":
-            return enqueue_creator_videos(
-                args.library,
-                selector=args.selector,
-                limit=args.limit,
-                verbose=args.verbose,
-            )
-    except Exception as exc:  # noqa: BLE001 - CLI should report cleanly
-        print(f"[error] {exc}", file=sys.stderr)
-        raise SystemExit(1) from exc
-    raise SystemExit(2)
+def _run_creator_add(args: argparse.Namespace) -> dict[str, Any]:
+    record = add_creator_source(args.library, source_url=args.url, name=args.name)
+    return {"status": "ok", "creator": record}
+
+
+def _run_creator_list(args: argparse.Namespace) -> dict[str, Any]:
+    return {"status": "ok", "creators": list_creator_sources(args.library)}
+
+
+def _run_creator_fetch(args: argparse.Namespace) -> dict[str, Any]:
+    return fetch_creator_videos(
+        args.library,
+        selector=args.selector,
+        limit=args.limit,
+        verbose=args.verbose,
+    )
+
+
+def _run_creator_enqueue(args: argparse.Namespace) -> dict[str, Any]:
+    return enqueue_creator_videos(
+        args.library,
+        selector=args.selector,
+        limit=args.limit,
+        verbose=args.verbose,
+    )
 
 
 def process_video(

@@ -6,6 +6,31 @@ from pathlib import Path
 from clipvault.subtitles import SubtitleSegment
 
 
+def test_top_level_help_discovers_subcommands():
+    from clipvault.cli import build_parser
+
+    help_text = build_parser().format_help()
+
+    assert "video" in help_text
+    assert "library" in help_text
+    assert "creator" in help_text
+
+
+def test_legacy_video_args_are_normalized():
+    from clipvault.cli import _normalize_legacy_args
+
+    assert _normalize_legacy_args(["https://youtube.com/watch?v=x"])[0] == "video"
+    assert _normalize_legacy_args(["--model", "tiny", "https://youtube.com/watch?v=x"])[0] == "video"
+    assert _normalize_legacy_args(["--help"]) == ["--help"]
+
+
+def test_global_library_before_subcommand_is_preserved():
+    from clipvault.cli import _normalize_legacy_args
+
+    args = ["--library", "E:\\VideoSubs", "library", "rebuild-index"]
+    assert _normalize_legacy_args(args) == args
+
+
 def test_process_video_with_series(tmp_path: Path, monkeypatch):
     """Verify --series flows into output path and manifest."""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/ffmpeg")
