@@ -131,7 +131,9 @@ def _dedupe_video_entries(videos: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Deduplicate video entries by video_id, keeping the last scanned entry."""
     deduped: dict[str, dict[str, Any]] = {}
     for video in videos:
-        key = str(video.get("video_id") or video.get("relative_path") or len(deduped))
+        key = video.get("video_id")
+        if not key:
+            continue
         deduped[key] = video
     result = list(deduped.values())
     _sort_video_entries(result)
@@ -292,7 +294,11 @@ def _required_text(data: dict[str, Any], field: str) -> str:
     return str(value).strip()
 
 
-def _manifest_video_entry(library: Path, manifest_path: Path, manifest: dict[str, Any]) -> tuple[Path, Path, dict[str, Any]]:
+def _manifest_video_entries(
+    library: Path,
+    manifest_path: Path,
+    manifest: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
     platform = _required_text(manifest, "platform")
     uploader = _required_text(manifest, "uploader")
     _required_text(manifest, "video_id")
@@ -305,9 +311,9 @@ def _manifest_video_entry(library: Path, manifest_path: Path, manifest: dict[str
     except ValueError as exc:
         raise ValueError(f"manifest is outside expected creator path: {creator_root}") from exc
 
-    entry = _video_entry(manifest, relative_path=creator_relative)
+    creator_entry = _video_entry(manifest, relative_path=creator_relative)
     if not series:
-        return creator_root, video_dir, entry
+        return creator_entry, None
 
     series_root = creator_root / safe_name(series)
     try:
@@ -315,9 +321,9 @@ def _manifest_video_entry(library: Path, manifest_path: Path, manifest: dict[str
     except ValueError as exc:
         raise ValueError(f"manifest is outside expected series path: {series_root}") from exc
 
-    series_entry = dict(entry)
+    series_entry = dict(creator_entry)
     series_entry["relative_path"] = series_relative
-    return creator_root, series_root, series_entry
+    return creator_entry, series_entry
 
 
 def rebuild_library_indexes(library: Path, *, dry_run: bool = False) -> dict[str, Any]:
@@ -347,18 +353,16 @@ def rebuild_library_indexes(library: Path, *, dry_run: bool = False) -> dict[str
             platform = _required_text(manifest, "platform")
             uploader = _required_text(manifest, "uploader")
             series = normalize_series(manifest.get("series"))
-            creator_root, index_root, entry = _manifest_video_entry(library, manifest_path, manifest)
+            creator_entry, series_entry = _manifest_video_entries(library, manifest_path, manifest)
         except (OSError, json.JSONDecodeError, ValueError) as exc:
             print(f"[index] skipped manifest ({manifest_path}): {exc}", file=sys.stderr)
             skipped.append({"path": str(manifest_path), "reason": str(exc)})
             continue
 
         creator_key = (platform, uploader)
-        creator_videos.setdefault(creator_key, []).append(
-            _video_entry(manifest, relative_path=video_dir.relative_to(creator_root).as_posix()),
-        )
-        if series:
-            series_videos.setdefault((platform, uploader, series), []).append(entry)
+        creator_videos.setdefault(creator_key, []).append(creator_entry)
+        if series and series_entry:
+            series_videos.setdefault((platform, uploader, series), []).append(series_entry)
 
     desired_indexes: dict[Path, dict[str, Any]] = {}
     for (platform, uploader), videos in sorted(creator_videos.items()):

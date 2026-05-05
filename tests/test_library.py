@@ -820,6 +820,31 @@ def test_rebuild_indexes_skips_bad_manifest(tmp_path: Path, capsys):
     assert [v["video_id"] for v in c_data["videos"]] == ["good"]
 
 
+def test_rebuild_indexes_skips_manifest_missing_video_id(tmp_path: Path, capsys):
+    video_dir = tmp_path / "youtube" / "U" / "Missing - id"
+    video_dir.mkdir(parents=True)
+    write_json(
+        video_dir / "manifest.json",
+        {
+            "schema_version": 1,
+            "platform": "youtube",
+            "uploader": "U",
+            "title": "Missing",
+            "subtitle_source": "subtitle:en:json3",
+            "output_files": ["transcript.srt", "transcript.txt", "transcript.md"],
+        },
+    )
+    (video_dir / "transcript.srt").write_text("", encoding="utf-8")
+    (video_dir / "transcript.txt").write_text("", encoding="utf-8")
+    (video_dir / "transcript.md").write_text("", encoding="utf-8")
+
+    result = rebuild_library_indexes(tmp_path)
+
+    assert result["videos_indexed"] == 0
+    assert "missing required field: video_id" in capsys.readouterr().err
+    assert not (tmp_path / "youtube" / "U" / "_index.json").exists()
+
+
 def test_rebuild_indexes_dry_run_does_not_write(tmp_path: Path):
     _write_completed_video(tmp_path, video_id="v1", title="Video", uploader="U")
 
