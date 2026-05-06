@@ -1,98 +1,98 @@
-# ClipVault MVP Development Summary
+# ClipVault MVP 开发总结
 
-## Conclusion
+## 结论
 
-ClipVault MVP is functionally complete against the current plan.
+ClipVault MVP 已经达到当前计划中的功能完整状态。
 
-The MVP goal was not to build an AI note-taking product yet. The goal was to prove and stabilize a local-first transcript vault:
+MVP 的目标不是先做 AI 笔记产品，而是验证并稳定一个本地优先的字幕库：
 
-1. Accept a video URL.
-2. Prefer platform subtitles or automatic captions.
-3. Fall back to local ASR when subtitles are unavailable.
-4. Export `srt`, `txt`, and `md`.
-5. Store outputs in a maintainable library structure.
-6. Support creator/series organization and basic batch ingestion.
-7. Provide a simple desktop UI over the same core pipeline.
+1. 接收视频 URL。
+2. 优先获取平台字幕或自动字幕。
+3. 无字幕时回退到本地 ASR。
+4. 导出 `srt`、`txt` 和 `md`。
+5. 把输出保存在可维护的本地仓库结构中。
+6. 支持创作者、系列组织和基础批量摄取。
+7. 提供一个覆盖同一核心流程的简单桌面 Web UI。
 
-This has been implemented and manually validated for:
+已手动验证：
 
-- YouTube: Jabzy `History of the Middle East`, automatic captions, 983 segments.
-- Bilibili: 一条闲木鱼《大明王朝》, no platform subtitle, CUDA ASR fallback, 1290 segments.
+- YouTube：Jabzy `History of the Middle East`，自动字幕，983 segments。
+- Bilibili：一条闲木鱼《大明王朝》，无平台字幕，CUDA ASR fallback，1290 segments。
 
-Douyin is recognized and routed as a platform, but real-link validation is not yet stable because current `yt-dlp` extraction requires fresh Douyin cookies. Treat Douyin as prototype support, not a stable MVP path.
+Douyin 已能被识别并路由为平台，但真实链接验证尚不稳定，因为当前 `yt-dlp` 提取需要 fresh Douyin cookies。Douyin 应视为原型支持，不应宣传为稳定 MVP 路径。
 
-## What Was Completed
+## 已完成内容
 
-### Phase 1: Transcript Core
+### Phase 1：字幕核心
 
-Completed.
+已完成。
 
-Implemented a reliable single-video transcript pipeline:
+实现了可靠的单视频字幕流程：
 
-- Metadata extraction through `yt-dlp`.
-- Platform subtitle discovery.
-- Subtitle parsing for Bilibili JSON, YouTube JSON3, VTT, and SRT.
-- Audio download fallback.
-- Local ASR through `faster-whisper`.
-- CUDA auto-selection with CPU fallback.
-- Export to `transcript.srt`, `transcript.txt`, and `transcript.md`.
-- User-visible program logs for metadata, subtitles, audio download, ASR, export, cache, and index stages.
+- 通过 `yt-dlp` 提取元数据。
+- 发现平台字幕。
+- 解析 Bilibili JSON、YouTube JSON3、VTT 和 SRT。
+- 音频下载 fallback。
+- 通过 `faster-whisper` 本地 ASR。
+- CUDA 自动选择，失败时 CPU fallback。
+- 导出 `transcript.srt`、`transcript.txt`、`transcript.md`。
+- 元数据、字幕、音频下载、ASR、导出、缓存、索引阶段都有用户可见程序日志。
 
-### Phase 2: Library and Metadata
+### Phase 2：仓库和元数据
 
-Completed.
+已完成。
 
-The output layout was moved to:
+输出布局调整为：
 
 ```text
 library/<platform>/<creator>/<video title - id>/
 ```
 
-With manual or automatic series assignment:
+手动或自动分配系列后：
 
 ```text
 library/<platform>/<creator>/<series>/<video title - id>/
 ```
 
-Each video folder contains:
+每个视频目录包含：
 
 ```text
 manifest.json
 transcript.srt
 transcript.txt
 transcript.md
-source_audio.m4a   # only when --keep-audio is used
+source_audio.m4a   # 仅 --keep-audio 时存在
 ```
 
-`manifest.json` is the stable metadata record for cache, indexes, and UI browsing. Cache completion checks both manifest state and actual output files.
+`manifest.json` 是缓存、索引和 UI 浏览的稳定元数据记录。缓存完整性检查同时验证 manifest 状态和实际输出文件。
 
-### Phase 3: Platform Path
+### Phase 3：平台路径
 
-Completed for Bilibili and YouTube. Prototype only for Douyin.
+Bilibili 和 YouTube 已完成，Douyin 仍为原型。
 
-- Bilibili is the primary validated path.
-- YouTube subtitles and automatic captions have been validated.
-- Douyin URL recognition and adapter helpers exist, but stable transcript extraction still depends on platform access/cookies.
+- Bilibili 是主要验证路径。
+- YouTube 字幕和自动字幕已验证。
+- Douyin URL 识别和 adapter helper 已存在，但稳定字幕提取仍依赖平台访问和 cookies。
 
-### Phase 4: Series and Indexes
+### Phase 4：系列和索引
 
-Completed.
+已完成。
 
-Implemented:
+实现：
 
-- Manual `--series`.
-- Creator indexes: `library/<platform>/<creator>/_index.json`.
-- Series indexes: `library/<platform>/<creator>/<series>/_index.json`.
-- `library rebuild-index`.
-- Title-based auto series rules through `_series_rules.json`.
+- 手动 `--series`。
+- 创作者索引：`library/<platform>/<creator>/_index.json`。
+- 系列索引：`library/<platform>/<creator>/<series>/_index.json`。
+- `library rebuild-index`。
+- 通过 `_series_rules.json` 做基于标题的自动系列规则。
 
-Series rules are local JSON files:
+系列规则是本地 JSON 文件：
 
 ```text
 library/<platform>/<creator>/_series_rules.json
 ```
 
-Example:
+示例：
 
 ```json
 {
@@ -107,47 +107,47 @@ Example:
 }
 ```
 
-### Phase 5: Creator Tracking and Queue
+### Phase 5：创作者追踪和队列
 
-Completed.
+已完成。
 
-Implemented:
+实现：
 
-- Creator source registry: `library/_creators.json`.
-- `creator add`.
-- `creator list`.
-- `creator fetch`.
-- `creator enqueue`.
-- Queue file: `library/_queue.json`.
-- `queue status`.
-- `queue list`.
-- `queue run`.
+- 创作者来源注册：`library/_creators.json`。
+- `creator add`。
+- `creator list`。
+- `creator fetch`。
+- `creator enqueue`。
+- 队列文件：`library/_queue.json`。
+- `queue status`。
+- `queue list`。
+- `queue run`。
 
-Queue jobs run through the same `process_video()` pipeline as a manually supplied video URL.
+队列任务通过和手动输入视频 URL 相同的 `process_video()` 流程执行。
 
-### Phase 6: Desktop UI
+### Phase 6：桌面 Web UI
 
-Completed as MVP.
+MVP 已完成。
 
-Implemented a local web UI served by ClipVault itself:
+实现了由 ClipVault 自己提供服务的本地 Web UI：
 
-- Video tab: paste URL, choose model/device, optional series, force, keep audio, view logs and result.
-- Library tab: browse platform/creator/series/video tree, read transcript, open output folder.
-- Creator tab: add creators, fetch recent videos, enqueue new videos.
-- Queue tab: inspect jobs, remove jobs, run jobs, stream logs.
-- Settings tab: save library path, ASR model/device, cookies path.
+- 视频页：粘贴 URL，选择模型/设备，可选系列、force、keep audio，查看日志和结果。
+- 仓库页：浏览平台/创作者/系列/视频树，读取字幕，打开输出目录。
+- 创作者页：添加创作者、抓取最近视频、入队新视频。
+- 队列页：查看任务、移除任务、运行队列、流式日志。
+- 设置页：保存仓库路径、ASR 模型/设备、cookies 路径。
 
-The UI is local-only and uses a random token. The server binds to `127.0.0.1`.
+UI 只在本地运行，使用随机 token。Server 绑定 `127.0.0.1`。
 
-## Project Structure
+## 项目结构
 
-### Root Files
+### 根目录文件
 
 ```text
 pyproject.toml
 ```
 
-Project metadata, dependencies, package discovery, and CLI entry point:
+项目元数据、依赖、包发现和 CLI 入口：
 
 ```text
 clipvault = "clipvault.cli:main"
@@ -159,45 +159,45 @@ requirements-gpu-win.lock
 uv.lock
 ```
 
-Pinned dependency files. GPU runtime is intentionally separate because Windows NVIDIA wheels are large.
+固定依赖文件。GPU 运行时单独拆分，因为 Windows NVIDIA wheel 体积较大。
 
 ```text
 clipvault.ps1
 ```
 
-Windows launcher for local development.
+Windows 本地开发启动脚本。
 
 ```text
 README.md
 ```
 
-User-facing quick start, command examples, login notes, output layout, and common workflows.
+用户快速开始、命令示例、登录说明、输出布局和常见工作流。
 
 ```text
 AGENTS.md
 ```
 
-Development rules for future agents and contributors: stepwise development, development logs, program logs, validation samples, and open-source maintenance expectations.
+未来 agent 和贡献者的开发规则：分步开发、开发日志、程序日志、验证样本和开源维护标准。
 
 ```text
 DESIGN.md
 ```
 
-UI design guidance for the desktop web interface.
+桌面 Web UI 的设计参考。
 
 ```text
 .gitignore
 ```
 
-Ignores local runtime state such as `.venv/`, `.tmp/`, `library/`, `.secrets/`, `.claude/`, caches, and generated cookie files.
+忽略 `.venv/`、`.tmp/`、`library/`、`.secrets/`、`.claude/`、缓存和 cookies 文件等本地运行状态。
 
-### Python Package
+### Python 包
 
 ```text
 clipvault/cli.py
 ```
 
-Main CLI entry point and orchestration. Defines top-level commands:
+主 CLI 入口和流程编排。定义顶层命令：
 
 - `video`
 - `library`
@@ -206,66 +206,66 @@ Main CLI entry point and orchestration. Defines top-level commands:
 - `auth`
 - `ui`
 
-It also contains `process_video()`, the core end-to-end video pipeline.
+也包含核心端到端视频流程 `process_video()`。
 
 ```text
 clipvault/platforms.py
 ```
 
-Platform detection, language preferences, and `yt-dlp` metadata extraction.
+平台检测、语言偏好和通过 `yt-dlp` 的元数据提取。
 
 ```text
 clipvault/adapters.py
 ```
 
-Platform adapter boundary for normalizing flat playlist/channel entries into usable video URLs. Covers Bilibili, YouTube, and Douyin URL shaping.
+平台适配边界，用于把扁平 playlist/channel 条目补全成可用视频 URL。覆盖 Bilibili、YouTube 和 Douyin URL 形态。
 
 ```text
 clipvault/subtitles.py
 ```
 
-Subtitle selection and parsing:
+字幕选择和解析：
 
-- Bilibili JSON.
-- YouTube JSON3.
-- VTT.
-- SRT.
+- Bilibili JSON。
+- YouTube JSON3。
+- VTT。
+- SRT。
 
-`get_platform_subtitles()` applies platform language priority and returns segments plus a source descriptor such as `subtitle:en:json3` or `automatic_caption:en-orig:json3`.
+`get_platform_subtitles()` 应用平台语言优先级，并返回 segments 和来源描述，例如 `subtitle:en:json3` 或 `automatic_caption:en-orig:json3`。
 
 ```text
 clipvault/asr.py
 ```
 
-Local ASR through `faster-whisper`. Resolves device and compute type, uses local cached models, and returns transcript segments.
+通过 `faster-whisper` 做本地 ASR。解析设备和 compute type，使用本地缓存模型，返回字幕 segments。
 
 ```text
 clipvault/exporters.py
 ```
 
-Converts transcript segments into:
+把 transcript segments 转换为：
 
-- SRT.
-- Plain text.
-- Markdown.
+- SRT。
+- 纯文本。
+- Markdown。
 
 ```text
 clipvault/library.py
 ```
 
-Library path generation, manifest helpers, cache completion checks, creator/series indexes, and index rebuild logic.
+仓库路径生成、manifest helper、缓存完整性检查、创作者/系列索引和索引重建逻辑。
 
 ```text
 clipvault/series_rules.py
 ```
 
-Title-based series assignment rules. Manual `--series` takes priority over rules.
+基于标题的系列分配规则。手动 `--series` 优先于规则。
 
 ```text
 clipvault/creators.py
 ```
 
-Creator registry, fetch preview, processed/new status detection, queue creation, queue listing, and queue persistence.
+创作者注册、抓取预览、processed/new 状态检测、队列创建、队列列表和队列持久化。
 
 ```text
 clipvault/auth.py
@@ -273,51 +273,51 @@ clipvault/login.py
 clipvault/credentials.py
 ```
 
-Credential handling:
+凭据处理：
 
-- Bilibili QR login.
-- Stored credentials in `%APPDATA%\clipvault\auth.toml`.
-- Conversion to temporary Netscape cookies for `yt-dlp`.
-- Auth listing and logout.
+- Bilibili 二维码登录。
+- 凭据保存到 `%APPDATA%\clipvault\auth.toml`。
+- 转换为临时 Netscape cookies 供 `yt-dlp` 使用。
+- Auth 列表和登出。
 
 ```text
 clipvault/models.py
 clipvault/text.py
 ```
 
-Small shared data structures and text helpers.
+小型共享数据结构和文本 helper。
 
-### UI Package
+### UI 包
 
 ```text
 clipvault/ui/server.py
 ```
 
-Local HTTP server for the desktop UI. Uses `ThreadingHTTPServer`, binds to `127.0.0.1`, and protects write/read APIs with a random token.
+桌面 UI 的本地 HTTP server。使用 `ThreadingHTTPServer`，绑定 `127.0.0.1`，并通过随机 token 保护读写 API。
 
-Important API routes:
+重要 API：
 
-| Method | Path | Purpose |
+| 方法 | 路径 | 用途 |
 | --- | --- | --- |
-| GET | `/api/status` | Health/version check |
-| GET | `/api/settings` | Load UI settings |
-| POST | `/api/settings` | Save UI settings |
-| POST | `/api/video` | Start a video processing job |
-| GET | `/api/process/status` | Get current job status |
-| GET | `/api/process/events` | SSE stream for job logs/results |
-| POST | `/api/process/stop` | Stop current job |
-| GET | `/api/library` | Read library tree |
-| GET | `/api/library/transcript` | Read transcript content |
-| GET | `/api/library/video` | Read manifest/transcript details |
-| POST | `/api/library/rebuild-index` | Rebuild indexes |
-| POST | `/api/open-path` | Open output folder, restricted to library root |
-| GET | `/api/creators` | List creators |
-| POST | `/api/creators/add` | Add creator source |
-| POST | `/api/creators/fetch` | Fetch recent creator videos |
-| POST | `/api/creators/enqueue` | Enqueue creator videos |
-| GET | `/api/queue` | Read queue status/jobs |
-| POST | `/api/queue/remove` | Remove queue job |
-| POST | `/api/queue/run` | Run queue jobs |
+| GET | `/api/status` | 健康检查和版本信息 |
+| GET | `/api/settings` | 读取 UI 设置 |
+| POST | `/api/settings` | 保存 UI 设置 |
+| POST | `/api/video` | 启动视频处理 job |
+| GET | `/api/process/status` | 获取当前 job 状态 |
+| GET | `/api/process/events` | 通过 SSE 流式获取 job 日志/结果 |
+| POST | `/api/process/stop` | 停止当前 job |
+| GET | `/api/library` | 读取仓库树 |
+| GET | `/api/library/transcript` | 读取字幕内容 |
+| GET | `/api/library/video` | 读取 manifest 和 transcript 详情 |
+| POST | `/api/library/rebuild-index` | 重建索引 |
+| POST | `/api/open-path` | 打开输出目录，限制在 library root 内 |
+| GET | `/api/creators` | 列出创作者 |
+| POST | `/api/creators/add` | 添加创作者来源 |
+| POST | `/api/creators/fetch` | 抓取最近创作者视频 |
+| POST | `/api/creators/enqueue` | 入队创作者视频 |
+| GET | `/api/queue` | 读取队列状态和任务 |
+| POST | `/api/queue/remove` | 移除队列任务 |
+| POST | `/api/queue/run` | 运行队列任务 |
 
 ```text
 clipvault/ui/static/index.html
@@ -325,62 +325,68 @@ clipvault/ui/static/app.js
 clipvault/ui/static/style.css
 ```
 
-Frontend UI files. They are intentionally simple static files with no build step.
+前端 UI 文件。它们故意保持简单静态文件，没有前端构建步骤。
 
-### Docs and Logs
+### 文档和日志
 
 ```text
 docs/plan/roadmap.md
 ```
 
-Main project roadmap and phase history.
+主项目路线图和阶段历史。
 
 ```text
 docs/plan/phase6-ui-spec.md
 ```
 
-Desktop UI implementation spec, including local security boundaries and job model.
+桌面 UI 实现规格，包括本地安全边界和 job 模型。
+
+```text
+docs/plan/phase7-quality-and-docs.md
+```
+
+Phase 7 的质量和文档建设计划。
 
 ```text
 logs/development/
 ```
 
-Development logs by step. These document what changed, why, and how it was verified.
+按步骤记录开发日志，说明改了什么、为什么改、如何验证。
 
 ```text
 logs/program/
 ```
 
-Program log conventions, so user-visible runtime messages stay consistent.
+程序日志约定，保持用户可见运行消息一致。
 
-### Tests
+### 测试
 
 ```text
 tests/
 ```
 
-Unit and integration-style tests for:
+覆盖范围包括：
 
-- Platform detection and adapters.
-- Subtitle parsing.
-- Exporters.
-- Library helpers and index rebuild.
-- Series rules.
-- Creator registry/fetch/enqueue.
-- Queue execution.
-- Auth and login behavior.
-- CLI argument parsing.
-- UI server helper behavior.
+- 平台检测和 adapter。
+- 字幕解析。
+- 导出器。
+- 仓库 helper 和索引重建。
+- 系列规则。
+- 创作者注册、抓取、入队。
+- 队列执行。
+- 认证和登录行为。
+- CLI 参数解析。
+- UI server helper 行为。
 
-Current full suite result at MVP review time:
+MVP review 时完整测试结果：
 
 ```text
 271 passed
 ```
 
-## CLI Surface
+## CLI 表面
 
-### Single Video
+### 单视频
 
 ```powershell
 clipvault video <url>
@@ -391,13 +397,13 @@ clipvault video <url> --cookies
 clipvault video <url> --cookies ".secrets\cookies.txt"
 ```
 
-Legacy shorthand is supported:
+兼容旧式简写：
 
 ```powershell
 clipvault <url>
 ```
 
-### Library
+### 仓库
 
 ```powershell
 clipvault library rebuild-index
@@ -405,7 +411,7 @@ clipvault library rebuild-index --library "E:\VideoSubs"
 clipvault library rebuild-index --dry-run
 ```
 
-### Creator
+### 创作者
 
 ```powershell
 clipvault creator add <creator-url> --name "Display Name"
@@ -414,7 +420,7 @@ clipvault creator fetch <creator-id-or-name> --limit 20
 clipvault creator enqueue <creator-id-or-name> --limit 20
 ```
 
-### Queue
+### 队列
 
 ```powershell
 clipvault queue status
@@ -424,7 +430,7 @@ clipvault queue run --limit 1
 clipvault queue run --limit 3 --retry-failed
 ```
 
-### Auth
+### 认证
 
 ```powershell
 clipvault auth login
@@ -441,17 +447,17 @@ clipvault ui --no-open
 clipvault ui --library "E:\VideoSubs"
 ```
 
-## Data Files
+## 数据文件
 
-### Video Manifest
+### 视频 Manifest
 
-Each processed video has:
+每个处理过的视频都有：
 
 ```text
 manifest.json
 ```
 
-Important fields:
+重要字段：
 
 - `schema_version`
 - `platform`
@@ -470,53 +476,53 @@ Important fields:
 - `asr_device`
 - `output_files`
 
-### Creator Index
+### 创作者索引
 
 ```text
 library/<platform>/<creator>/_index.json
 ```
 
-Used by library browsing and future GUI/automation features.
+用于仓库浏览和未来 GUI/自动化功能。
 
-### Series Index
+### 系列索引
 
 ```text
 library/<platform>/<creator>/<series>/_index.json
 ```
 
-Created only for series folders.
+仅在系列目录中创建。
 
-### Creator Registry
+### 创作者注册表
 
 ```text
 library/_creators.json
 ```
 
-Tracks followed creators/channels.
+记录关注的创作者或频道来源。
 
-### Queue
+### 队列
 
 ```text
 library/_queue.json
 ```
 
-Tracks pending/done/failed transcript jobs.
+记录 pending、done 和 failed 字幕任务。
 
-### UI Settings
+### UI 设置
 
-Windows:
+Windows：
 
 ```text
 %APPDATA%\ClipVault\settings.json
 ```
 
-Other systems:
+其他系统：
 
 ```text
 ~/.config/ClipVault/settings.json
 ```
 
-Stores:
+保存：
 
 - `library`
 - `model`
@@ -524,25 +530,25 @@ Stores:
 - `compute_type`
 - `cookies`
 
-### Credentials
+### 凭据
 
-Stored auth:
+保存的认证：
 
 ```text
 %APPDATA%\clipvault\auth.toml
 ```
 
-Generated local Netscape cookies cache:
+生成的本地 Netscape cookies 缓存：
 
 ```text
 %APPDATA%\clipvault\netscape_cookies.txt
 ```
 
-These files are local secrets and must never be committed.
+这些文件是本地密钥，绝不能提交。
 
-## Runtime Behavior
+## 运行行为
 
-The single-video pipeline is:
+单视频流程：
 
 ```text
 URL
@@ -550,126 +556,126 @@ URL
   -> platform detection
   -> series resolution
   -> cache check
-  -> platform subtitle/automatic caption lookup
+  -> platform subtitle / automatic caption lookup
   -> ASR fallback if no subtitle
   -> srt/txt/md export
   -> manifest update
   -> creator/series index update
 ```
 
-The UI does not duplicate pipeline logic. It launches CLI subprocess jobs and streams logs/results through SSE.
+UI 不复制管线逻辑。它启动 CLI 子进程，并通过 SSE 推送日志和结果。
 
-## Manual Validation State
+## 手动验证状态
 
 ### YouTube
 
-Validated:
+已验证：
 
 ```text
 https://www.youtube.com/watch?v=Vdd6EOlRVbg
 ```
 
-Result:
+结果：
 
-- Platform: `youtube`
-- Creator: `Jabzy`
-- Series: `History of the Middle East`
-- Source: `automatic_caption:en-orig:json3`
-- Segments: `983`
-- Cache hit also returns `source` and `segments`
+- Platform：`youtube`
+- Creator：`Jabzy`
+- Series：`History of the Middle East`
+- Source：`automatic_caption:en-orig:json3`
+- Segments：`983`
+- Cache hit 也返回 `source` 和 `segments`
 
 ### Bilibili
 
-Validated:
+已验证：
 
 ```text
 https://www.bilibili.com/video/BV16G411973A
 ```
 
-Result:
+结果：
 
-- Platform: `bilibili`
-- Creator: `一条闲木鱼`
-- Series: `大明王朝`
-- Source: `asr:faster-whisper`
-- Model/device: `small` + `cuda`
-- Segments: `1290`
-- Stored Bilibili credentials work with `--cookies`
+- Platform：`bilibili`
+- Creator：`一条闲木鱼`
+- Series：`大明王朝`
+- Source：`asr:faster-whisper`
+- Model/device：`small` + `cuda`
+- Segments：`1290`
+- 已保存 Bilibili 凭据可与 `--cookies` 配合使用
 
 ### Douyin
 
-Attempted but not stable:
+尝试过但不稳定：
 
 ```text
 https://www.douyin.com/video/7609585779190612002
 ```
 
-Result:
+结果：
 
-- `yt-dlp` returned `Fresh cookies are needed`.
-- Current stored credentials only include Bilibili.
-- Douyin should stay marked as experimental until a reliable cookie/login/export path is defined.
+- `yt-dlp` 返回 `Fresh cookies are needed`。
+- 当前已保存凭据只包含 Bilibili。
+- 在可靠 cookies、登录或导出路径定义前，Douyin 仍应标记为 experimental。
 
-## Known Limitations
+## 已知限制
 
-- Douyin extraction is not stable yet.
-- The UI model selector can expose models that are not locally cached; missing models fail clearly, but the UI does not yet show installed model status.
-- Series rules are manually edited JSON files; there is no UI or CLI management command yet.
-- Creator tracking relies on platform extractor behavior and may change when platforms change their pages.
-- The UI is functional but still MVP-level; it needs sustained real-user testing.
-- No AI note generation, Q&A, retrieval, or knowledge-base layer has been implemented yet.
+- Douyin 提取尚不稳定。
+- UI 模型选择器可能展示本地未缓存的模型；缺模型时会清晰失败，但 UI 尚未展示已安装模型状态。
+- 系列规则需要手动编辑 JSON，没有 UI 或 CLI 管理命令。
+- 创作者追踪依赖平台 extractor 行为，平台页面变化可能影响结果。
+- UI 可用但仍是 MVP，需要持续真实使用测试。
+- 尚未实现 AI 笔记、问答、检索或知识库层。
 
-## Future Development Direction
+## 未来开发方向
 
-### Near Term: Product Hardening
+### 近期：产品打磨
 
-1. Use the app heavily with real videos and record UX issues.
-2. Add a structured issue table in `docs/plan/` after real usage.
-3. Improve UI error display and empty states.
-4. Show installed ASR models and prevent selecting unavailable models.
-5. Add UI controls for series rules.
-6. Improve queue history, retry visibility, and failed-job diagnostics.
+1. 用真实视频高频使用，并记录 UX 问题。
+2. 在 `docs/plan/` 维护结构化 issue 表。
+3. 改善 UI 错误展示和空状态。
+4. 展示已安装 ASR 模型，避免选择不可用模型。
+5. 为系列规则增加 UI 控制。
+6. 改善队列历史、重试可见性和 failed-job 诊断。
 
-### Platform Reliability
+### 平台可靠性
 
-1. Harden Bilibili login/session refresh and subtitle detection.
-2. Keep YouTube validation stable with fixed sample videos.
-3. Research Douyin cookies and extractor feasibility before claiming support.
-4. Add platform-specific notes for common failure modes.
+1. 打磨 Bilibili 登录/session 刷新和字幕检测。
+2. 用固定样本保持 YouTube 验证稳定。
+3. 在声明支持前研究 Douyin cookies 和 extractor 可行性。
+4. 增加常见失败模式的平台说明。
 
-### Library Management
+### 仓库管理
 
-1. Better search/filter across local transcripts.
-2. Rename/move series from UI.
-3. Duplicate detection and cleanup tools.
-4. Import/export library metadata.
-5. Optional migration helpers for old layouts.
+1. 更好的本地字幕搜索和过滤。
+2. 从 UI 重命名或移动系列。
+3. 重复检测和清理工具。
+4. 导入/导出仓库元数据。
+5. 旧布局迁移 helper。
 
-### AI Layer
+### AI 层
 
-Only after transcript acquisition and library browsing are stable:
+仅在字幕获取和仓库浏览稳定后再做：
 
-1. Transcript chunking.
-2. Local or API-based summarization.
-3. Markdown note generation.
-4. Q&A over one transcript.
-5. Q&A over a creator/series collection.
-6. Claim extraction and fact-checking workflows.
+1. Transcript chunking。
+2. 本地或 API 摘要。
+3. Markdown 笔记生成。
+4. 单个 transcript 问答。
+5. 创作者/系列集合问答。
+6. Claim extraction 和事实核查流程。
 
-The core principle should remain: transcripts are the durable source asset; AI notes are derived artifacts.
+核心原则不变：字幕是耐久源资产，AI 笔记是派生资产。
 
-## Handoff Notes
+## 交接说明
 
-For a new developer, start with:
+新开发者建议从这里开始：
 
-1. `README.md` for usage.
-2. `docs/plan/roadmap.md` for phased context.
-3. `clipvault/cli.py::process_video()` for the main pipeline.
-4. `clipvault/library.py` for storage, cache, and indexes.
-5. `clipvault/ui/server.py` for local API and job execution.
-6. `tests/test_cli.py`, `tests/test_library.py`, and `tests/test_ui_server.py` for behavioral contracts.
+1. `README.md`：使用方式。
+2. `docs/plan/roadmap.md`：阶段上下文。
+3. `clipvault/cli.py::process_video()`：主流程。
+4. `clipvault/library.py`：存储、缓存和索引。
+5. `clipvault/ui/server.py`：本地 API 和 job 执行。
+6. `tests/test_cli.py`、`tests/test_library.py`、`tests/test_ui_server.py`：行为契约。
 
-Before making changes:
+修改前建议执行：
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
@@ -677,4 +683,4 @@ node --check clipvault\ui\static\app.js
 git diff --check
 ```
 
-For real-link validation, use the samples listed in `docs/plan/roadmap.md` and record the exact URL, result, source, segment count, and failure mode.
+真实链接验证使用 `docs/plan/roadmap.md` 中列出的样本，并记录准确 URL、结果、来源、segment count 和失败模式。
