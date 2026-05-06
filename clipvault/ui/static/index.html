@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ClipVault</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<nav id="top-nav">
+  <a class="nav-brand" href="/">ClipVault</a>
+  <div class="nav-tabs">
+    <button class="nav-tab active" data-tab="video">视频</button>
+    <button class="nav-tab" data-tab="library">仓库</button>
+    <button class="nav-tab" data-tab="creators">创作者</button>
+    <button class="nav-tab" data-tab="queue">队列</button>
+    <button class="nav-tab" data-tab="settings">设置</button>
+  </div>
+  <div id="nav-status" class="nav-status"></div>
+</nav>
+
+<main id="main-content">
+  <!-- ── Video Tab ── -->
+  <section id="tab-video" class="tab-pane active">
+    <h1>处理新视频</h1>
+    <p class="muted mb-lg">输入视频 URL，ClipVault 将自动获取字幕或在无字幕时运行本地语音识别。</p>
+
+    <div class="card">
+      <div class="flex-col-md">
+        <input type="text" id="video-url" class="text-input" placeholder="视频 URL (Bilibili, YouTube 等)" />
+
+        <div class="flex-row" style="flex-wrap: wrap;">
+          <input type="text" id="video-series" class="text-input" placeholder='--series "系列名称"' style="flex: 1; min-width: 180px;" />
+          <select id="video-device" class="text-input" style="width: auto;">
+            <option value="auto">auto (默认)</option>
+            <option value="cuda">CUDA</option>
+            <option value="cpu">CPU</option>
+          </select>
+          <select id="video-model" class="text-input" style="width: auto;">
+            <option value="small">small (默认)</option>
+            <option value="tiny">tiny</option>
+            <option value="medium">medium</option>
+            <option value="large-v3">large-v3</option>
+          </select>
+          <label class="flex-row" style="cursor: pointer; white-space: nowrap;">
+            <input type="checkbox" id="video-force" /> 强制重处理
+          </label>
+          <label class="flex-row" style="cursor: pointer; white-space: nowrap;">
+            <input type="checkbox" id="video-keep-audio" /> 保留音频
+          </label>
+        </div>
+
+        <button id="video-start" class="btn-primary">开始处理</button>
+      </div>
+    </div>
+
+    <div id="video-log-area" style="display: none;">
+      <h2 class="mt-lg mb-md">处理日志</h2>
+      <div id="video-log" class="log-console"></div>
+    </div>
+
+    <div id="video-result" style="display: none;">
+      <h2 class="mt-lg mb-md">处理完成</h2>
+      <div class="card" id="video-result-card"></div>
+    </div>
+  </section>
+
+  <!-- ── Library Tab ── -->
+  <section id="tab-library" class="tab-pane">
+    <div class="flex-row" style="justify-content: space-between; align-items: center;">
+      <h1>仓库</h1>
+      <button id="library-rebuild" class="btn-secondary btn-small">重建索引</button>
+    </div>
+    <div class="split-layout">
+      <aside>
+        <div id="library-tree" class="tree"><p class="muted">切换到仓库标签以加载</p></div>
+      </aside>
+      <main>
+        <div id="library-detail">
+          <p class="muted">选择一个视频查看详情</p>
+        </div>
+      </main>
+    </div>
+  </section>
+
+  <!-- ── Creators Tab ── -->
+  <section id="tab-creators" class="tab-pane">
+    <h1>创作者</h1>
+    <div class="card">
+      <h2 class="mb-md">添加创作者</h2>
+      <div class="flex-row">
+        <input type="text" id="creator-url" class="text-input" placeholder="创作者 URL (Bilibili, YouTube 等)" style="flex: 2;" />
+        <input type="text" id="creator-name" class="text-input" placeholder="名称（可选）" style="flex: 1;" />
+        <button id="creator-add" class="btn-primary">添加</button>
+      </div>
+    </div>
+    <div id="creator-list">
+      <p class="muted">切换到创作者标签以加载</p>
+    </div>
+  </section>
+
+  <!-- ── Queue Tab ── -->
+  <section id="tab-queue" class="tab-pane">
+    <div class="flex-row" style="justify-content: space-between; align-items: center; flex-wrap: wrap;">
+      <h1>队列</h1>
+      <div class="flex-row">
+        <input type="number" id="queue-run-limit" class="text-input" min="1" value="1" style="width: 88px;" />
+        <label class="flex-row" style="cursor: pointer; white-space: nowrap;">
+          <input type="checkbox" id="queue-retry-failed" /> 重试失败
+        </label>
+        <label class="flex-row" style="cursor: pointer; white-space: nowrap;">
+          <input type="checkbox" id="queue-keep-audio" /> 保留音频
+        </label>
+        <label class="flex-row" style="cursor: pointer; white-space: nowrap;">
+          <input type="checkbox" id="queue-verbose" /> 详细日志
+        </label>
+        <button id="queue-run" class="btn-secondary btn-small">运行队列</button>
+      </div>
+    </div>
+    <div id="queue-status" class="card"><p class="muted">切换到队列标签以加载</p></div>
+    <div id="queue-list"></div>
+    <div id="queue-log-area" style="display: none;">
+      <h2 class="mt-lg mb-md">运行日志</h2>
+      <div id="queue-log" class="log-console"></div>
+    </div>
+  </section>
+
+  <!-- ── Settings Tab ── -->
+  <section id="tab-settings" class="tab-pane">
+    <h1>设置</h1>
+    <div class="card">
+      <div class="flex-col-md">
+        <label>仓库路径</label>
+        <input type="text" id="set-library" class="text-input" placeholder="E:/myproject/ClipVault/library" />
+        <label>Whisper 模型</label>
+        <select id="set-model" class="text-input">
+          <option value="tiny">tiny</option>
+          <option value="small" selected>small</option>
+          <option value="medium">medium</option>
+          <option value="large-v3">large-v3</option>
+        </select>
+        <label>设备</label>
+        <select id="set-device" class="text-input">
+          <option value="auto">auto (默认)</option>
+          <option value="cuda">CUDA</option>
+          <option value="cpu">CPU</option>
+        </select>
+        <label>Cookies 文件路径</label>
+        <input type="text" id="set-cookies" class="text-input" placeholder="可选" />
+        <button id="settings-save" class="btn-primary" style="align-self: flex-start;">保存设置</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>

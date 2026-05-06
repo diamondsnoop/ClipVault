@@ -45,7 +45,7 @@ from .subtitles import get_platform_subtitles
 
 
 DEFAULT_LIBRARY = Path.cwd() / "library"
-TOP_LEVEL_COMMANDS = {"video", "library", "creator", "queue", "auth"}
+TOP_LEVEL_COMMANDS = {"video", "library", "creator", "queue", "auth", "ui"}
 CLIPVAULT_AUTH_SENTINEL = "__clipvault_auth__"
 
 
@@ -78,6 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_creator_parser(subparsers)
     _add_queue_parser(subparsers)
     _add_auth_parser(subparsers)
+    _add_ui_parser(subparsers)
     return parser
 
 
@@ -331,6 +332,22 @@ def _add_auth_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPar
     logout.set_defaults(handler=_run_auth_logout)
 
 
+def _add_ui_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subparsers.add_parser("ui", help="Start the local web UI.")
+    parser.add_argument("--port", type=int, default=8080, help="Server port. Default: 8080.")
+    parser.add_argument("--no-open", action="store_true", default=False, help="Do not auto-open browser.")
+    _add_library_option(parser, default=argparse.SUPPRESS)
+    parser.set_defaults(handler=_run_ui)
+
+
+def _run_ui(args: argparse.Namespace) -> dict[str, Any]:
+    from .ui.server import run_server
+
+    library = getattr(args, "library", None) or DEFAULT_LIBRARY
+    run_server(port=args.port, open_browser=not args.no_open, library=library)
+    return {"status": "ok", "message": "UI server stopped."}
+
+
 def _run_auth_login(args: argparse.Namespace) -> dict[str, Any]:
     # Check if any manual cookie values were provided
     manual_keys = [k for k in PLATFORM_CREDENTIAL_KEYS[args.platform] if getattr(args, k, None)]
@@ -490,6 +507,17 @@ def _run_queue_run(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _count_srt_segments(srt_path: Path) -> int:
+    """Count subtitle blocks in an SRT file. Returns 0 if the file is missing."""
+    try:
+        content = srt_path.read_text(encoding="utf-8").strip()
+        if not content:
+            return 0
+        return len([b for b in content.split("\n\n") if b.strip()])
+    except (FileNotFoundError, OSError):
+        return 0
+
+
 def process_video(
     *,
     url: str,
@@ -534,6 +562,8 @@ def process_video(
             update_library_indexes(video_dir, cached_manifest, library)
         except Exception as exc:
             print(f"[index] failed on cache hit ({video_dir}): {exc}", file=sys.stderr)
+        source = cached_manifest.get("subtitle_source")
+        segments = _count_srt_segments(video_dir / "transcript.srt")
         return {
             "status": "cached",
             "title": title,
@@ -542,6 +572,8 @@ def process_video(
             "platform": platform,
             "series": series,
             "series_source": series_source,
+            "source": source,
+            "segments": segments,
             "markdown": str(md_path) if md_path.exists() else None,
             "folder": str(video_dir),
         }

@@ -24,6 +24,15 @@ def test_top_level_help_discovers_subcommands():
     assert "creator" in help_text
     assert "queue" in help_text
     assert "auth" in help_text
+    assert "ui" in help_text
+
+
+def test_ui_command_parses():
+    args = _parse_cli(["ui", "--port", "9090", "--no-open"])
+
+    assert args.command == "ui"
+    assert args.port == 9090
+    assert args.no_open is True
 
 
 def test_auth_subcommand_not_normalized():
