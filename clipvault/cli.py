@@ -27,6 +27,8 @@ from .creators import (
 from .exporters import write_outputs
 from .library import (
     build_manifest,
+    current_timestamp_iso,
+    describe_subtitle_source,
     first_text,
     guess_platform,
     is_completed,
@@ -581,6 +583,10 @@ def process_video(
         except Exception as exc:
             emit_log("index", f"缓存命中后的索引更新失败：{video_dir}（{exc}）", level="warning")
         source = cached_manifest.get("subtitle_source")
+        source_label = cached_manifest.get("subtitle_source_label")
+        source_detail = cached_manifest.get("subtitle_source_detail")
+        if not source_label and source:
+            source_label, source_detail = describe_subtitle_source(str(source))
         segments = _count_srt_segments(video_dir / "transcript.srt")
         return {
             "status": "cached",
@@ -591,6 +597,8 @@ def process_video(
             "series": series,
             "series_source": series_source,
             "source": source,
+            "source_label": source_label,
+            "source_detail": source_detail,
             "segments": segments,
             "asr_model": cached_manifest.get("asr_model"),
             "asr_device": cached_manifest.get("asr_device"),
@@ -603,81 +611,116 @@ def process_video(
     video_dir.mkdir(parents=True, exist_ok=True)
 
     manifest = build_manifest(info, url=url, title=title, uploader=uploader, video_id=video_id, series=series)
-    write_json(video_dir / "manifest.json", manifest)
+    manifest_path = video_dir / "manifest.json"
+    write_json(manifest_path, manifest)
 
-    segments, source = get_platform_subtitles(info, platform=platform, cookies=cookies)
-    if not segments:
-        emit_log("subtitle", "未找到可用平台字幕，回退到本地 ASR", level="warning")
-        audio_path = download_audio(url, video_dir, verbose=verbose, cookies=cookies)
-        transcription = transcribe_audio(audio_path, model_name=model_name, device=device, compute_type=compute_type)
-        if isinstance(transcription, TranscriptionResult):
-            segments = transcription.segments
-            actual_asr_device = transcription.device
-        else:
-            segments = transcription
-            actual_asr_device = resolve_device(device)
-        source = "asr:faster-whisper"
-        if simplify_chinese:
-            try:
-                segments = simplify_chinese_segments(segments)
-            except RuntimeError as exc:
-                emit_log("asr", f"{exc} 已跳过中文转简。", level="warning")
-            else:
-                emit_log("asr", "已将中文 ASR 结果转换为简体中文", level="success")
-        if not keep_audio:
-            try:
-                audio_path.unlink()
-            except OSError:
-                pass
-    else:
-        emit_log("subtitle", f"将使用平台字幕：{source}", level="success")
-
-    write_outputs(
-        video_dir=video_dir,
-        title=title,
-        uploader=uploader,
-        url=url,
-        video_id=video_id,
-        source=source,
-        segments=segments,
-    )
-
-    emit_log("export", f"已写出 SRT：{video_dir / 'transcript.srt'}", level="success")
-    emit_log("export", f"已写出 TXT：{video_dir / 'transcript.txt'}", level="success")
-    emit_log("export", f"已写出 Markdown：{video_dir / 'transcript.md'}", level="success")
-
-    manifest_updates: dict[str, Any] = {
-        "subtitle_source": source,
-        "output_files": ["transcript.srt", "transcript.txt", "transcript.md"],
-    }
-    if source.startswith("asr:"):
-        manifest_updates["asr_model"] = model_name
-        manifest_updates["asr_device"] = actual_asr_device
-    final_manifest: dict[str, Any] | None = None
+    source = ""
+    actual_asr_device: str | None = None
+    segments: list[Any] = []
     try:
-        final_manifest = update_manifest(video_dir / "manifest.json", fallback=manifest, **manifest_updates)
-    except RuntimeError as exc:
-        emit_log("library", f"更新 manifest 失败：{exc}", level="error")
+        segments, source = get_platform_subtitles(info, platform=platform, cookies=cookies)
+        if not segments:
+            emit_log("subtitle", "未找到可用平台字幕，回退到本地 ASR", level="warning")
+            audio_path = download_audio(url, video_dir, verbose=verbose, cookies=cookies)
+            transcription = transcribe_audio(audio_path, model_name=model_name, device=device, compute_type=compute_type)
+            if isinstance(transcription, TranscriptionResult):
+                segments = transcription.segments
+                actual_asr_device = transcription.device
+            else:
+                segments = transcription
+                actual_asr_device = resolve_device(device)
+            source = "asr:faster-whisper"
+            if simplify_chinese:
+                try:
+                    segments = simplify_chinese_segments(segments)
+                except RuntimeError as exc:
+                    emit_log("asr", f"{exc} 已跳过中文转简。", level="warning")
+                else:
+                    emit_log("asr", "已将中文 ASR 结果转换为简体中文", level="success")
+            if not keep_audio:
+                try:
+                    audio_path.unlink()
+                except OSError:
+                    pass
+        else:
+            emit_log("subtitle", f"将使用平台字幕：{source}", level="success")
 
-    # Update indexes after manifest is final
-    if final_manifest is not None:
+        write_outputs(
+            video_dir=video_dir,
+            title=title,
+            uploader=uploader,
+            url=url,
+            video_id=video_id,
+            source=source,
+            segments=segments,
+        )
+
+        emit_log("export", f"已写出 SRT：{video_dir / 'transcript.srt'}", level="success")
+        emit_log("export", f"已写出 TXT：{video_dir / 'transcript.txt'}", level="success")
+        emit_log("export", f"已写出 Markdown：{video_dir / 'transcript.md'}", level="success")
+
+        source_label, source_detail = describe_subtitle_source(source)
+        manifest_updates: dict[str, Any] = {
+            "processed_at": current_timestamp_iso(),
+            "processing_state": "completed",
+            "failed_at": None,
+            "last_error": None,
+            "subtitle_source": source,
+            "subtitle_source_label": source_label,
+            "subtitle_source_detail": source_detail,
+            "output_files": ["transcript.srt", "transcript.txt", "transcript.md"],
+        }
+        if source.startswith("asr:"):
+            manifest_updates["asr_model"] = model_name
+            manifest_updates["asr_device"] = actual_asr_device
+        final_manifest: dict[str, Any] | None = None
         try:
-            update_library_indexes(video_dir, final_manifest, library)
-        except Exception as exc:
-            emit_log("index", f"处理完成后的索引更新失败：{video_dir}（{exc}）", level="warning")
+            final_manifest = update_manifest(manifest_path, fallback=manifest, **manifest_updates)
+        except RuntimeError as exc:
+            emit_log("library", f"更新 manifest 失败：{exc}", level="error")
 
-    return {
-        "status": "ok",
-        "source": source,
-        "title": title,
-        "uploader": uploader,
-        "video_id": video_id,
-        "platform": platform,
-        "series": series,
-        "series_source": series_source,
-        "segments": len(segments),
-        "asr_model": manifest_updates.get("asr_model"),
-        "asr_device": manifest_updates.get("asr_device"),
-        "markdown": str(video_dir / "transcript.md"),
-        "folder": str(video_dir),
-    }
+        # Update indexes after manifest is final
+        if final_manifest is not None:
+            try:
+                update_library_indexes(video_dir, final_manifest, library)
+            except Exception as exc:
+                emit_log("index", f"处理完成后的索引更新失败：{video_dir}（{exc}）", level="warning")
+
+        return {
+            "status": "ok",
+            "source": source,
+            "source_label": source_label,
+            "source_detail": source_detail,
+            "title": title,
+            "uploader": uploader,
+            "video_id": video_id,
+            "platform": platform,
+            "series": series,
+            "series_source": series_source,
+            "segments": len(segments),
+            "asr_model": manifest_updates.get("asr_model"),
+            "asr_device": manifest_updates.get("asr_device"),
+            "markdown": str(video_dir / "transcript.md"),
+            "folder": str(video_dir),
+        }
+    except Exception as exc:
+        failure_updates: dict[str, Any] = {
+            "processed_at": current_timestamp_iso(),
+            "processing_state": "failed",
+            "failed_at": current_timestamp_iso(),
+            "last_error": str(exc),
+            "output_files": [],
+        }
+        if source:
+            source_label, source_detail = describe_subtitle_source(source)
+            failure_updates["subtitle_source"] = source
+            failure_updates["subtitle_source_label"] = source_label
+            failure_updates["subtitle_source_detail"] = source_detail
+        if source.startswith("asr:"):
+            failure_updates["asr_model"] = model_name
+            failure_updates["asr_device"] = actual_asr_device
+        try:
+            update_manifest(manifest_path, fallback=manifest, **failure_updates)
+        except RuntimeError as manifest_exc:
+            emit_log("library", f"写入失败状态 manifest 失败：{manifest_exc}", level="warning")
+        raise

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 import re
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .platforms import identify_platform
+from .runtime_logs import emit_log
 
 
 SCHEMA_VERSION = 1
@@ -36,6 +36,10 @@ def is_completed(video_dir: Path) -> bool:
     try:
         data = json.loads(manifest_path.read_text(encoding="utf-8"))
     except Exception:
+        return False
+
+    processing_state = data.get("processing_state")
+    if processing_state and processing_state != "completed":
         return False
 
     output_files = data.get("output_files")
@@ -94,17 +98,78 @@ def build_manifest(
         "description": info.get("description"),
         "creator_id": info.get("channel_id") or info.get("uploader_id"),
         "processed_at": datetime.now(timezone.utc).isoformat(),
+        "processing_state": "started",
+        "failed_at": None,
+        "last_error": None,
         "subtitle_source": None,
+        "subtitle_source_label": None,
+        "subtitle_source_detail": None,
         "asr_model": None,
         "asr_device": None,
         "output_files": [],
     }
 
 
-def update_manifest(path: Path, **updates: Any) -> None:
-    data = json.loads(path.read_text(encoding="utf-8"))
+def update_manifest(path: Path, *, fallback: dict[str, Any] | None = None, **updates: Any) -> dict[str, Any]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        if fallback is None:
+            raise RuntimeError(f"未找到 manifest 文件：{path}") from exc
+        data = dict(fallback)
+    except json.JSONDecodeError as exc:
+        if fallback is None:
+            raise RuntimeError(
+                f"manifest JSON 无法解析：{path}（第 {exc.lineno} 行，第 {exc.colno} 列）"
+            ) from exc
+        data = dict(fallback)
+    except OSError as exc:
+        raise RuntimeError(f"读取 manifest 失败：{path}（{exc}）") from exc
+    if not isinstance(data, dict):
+        raise RuntimeError(f"manifest 必须是 JSON 对象：{path}")
     data.update(updates)
-    write_json(path, data)
+    try:
+        write_json(path, data)
+    except OSError as exc:
+        raise RuntimeError(f"写入 manifest 失败：{path}（{exc}）") from exc
+    return data
+
+
+def current_timestamp_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def describe_subtitle_source(source: str | None) -> tuple[str | None, str | None]:
+    source = str(source or "").strip()
+    if not source:
+        return None, None
+
+    if source.startswith("subtitle:"):
+        parts = source.split(":", 2)
+        lang = parts[1] if len(parts) > 1 else "unknown"
+        fmt = parts[2] if len(parts) > 2 else "unknown"
+        return (
+            f"平台字幕（{lang} / {fmt}）",
+            "已直接使用平台提供的字幕轨。",
+        )
+
+    if source.startswith("automatic_caption:"):
+        parts = source.split(":", 2)
+        lang = parts[1] if len(parts) > 1 else "unknown"
+        fmt = parts[2] if len(parts) > 2 else "unknown"
+        return (
+            f"平台自动字幕（{lang} / {fmt}）",
+            "已直接使用平台自动生成的字幕轨。",
+        )
+
+    if source.startswith("asr:"):
+        engine = source.split(":", 1)[1] if ":" in source else "unknown"
+        return (
+            f"本地 ASR（{engine}）",
+            "当前平台没有可下载字幕轨，已回退到本地 ASR。标题里的“中字/双语”可能只是画面硬字幕，不代表平台提供了字幕文件。",
+        )
+
+    return source, None
 
 
 def guess_platform(url: str) -> str:
@@ -169,9 +234,13 @@ def _video_entry(manifest: dict[str, Any], *, relative_path: str) -> dict[str, A
         "relative_path": relative_path,
         "source_url": manifest.get("source_url", ""),
         "subtitle_source": manifest.get("subtitle_source"),
+        "subtitle_source_label": manifest.get("subtitle_source_label"),
+        "subtitle_source_detail": manifest.get("subtitle_source_detail"),
         "duration": manifest.get("duration"),
         "upload_date": manifest.get("upload_date"),
         "processed_at": manifest.get("processed_at", ""),
+        "processing_state": manifest.get("processing_state"),
+        "last_error": manifest.get("last_error"),
     }
 
 
@@ -246,7 +315,7 @@ def update_library_indexes(video_dir: Path, manifest: dict[str, Any], library: P
     c_index["updated_at"] = now
 
     write_json(c_path, c_index)
-    print(f"[index] creator: {c_path}", file=sys.stderr)
+    emit_log("index", f"已更新创作者索引：{c_path}", level="success")
 
     # ── Series index ───────────────────────────────────────────────
     if not series:
@@ -284,13 +353,13 @@ def update_library_indexes(video_dir: Path, manifest: dict[str, Any], library: P
     s_index["updated_at"] = now
 
     write_json(s_path, s_index)
-    print(f"[index] series: {s_path}", file=sys.stderr)
+    emit_log("index", f"已更新系列索引：{s_path}", level="success")
 
 
 def _required_text(data: dict[str, Any], field: str) -> str:
     value = data.get(field)
     if value is None or not str(value).strip():
-        raise ValueError(f"missing required field: {field}")
+        raise ValueError(f"缺少必填字段：{field}")
     return str(value).strip()
 
 
@@ -309,7 +378,7 @@ def _manifest_video_entries(
     try:
         creator_relative = video_dir.relative_to(creator_root).as_posix()
     except ValueError as exc:
-        raise ValueError(f"manifest is outside expected creator path: {creator_root}") from exc
+        raise ValueError(f"manifest 不在预期创作者目录下：{creator_root}") from exc
 
     creator_entry = _video_entry(manifest, relative_path=creator_relative)
     if not series:
@@ -319,7 +388,7 @@ def _manifest_video_entries(
     try:
         series_relative = video_dir.relative_to(series_root).as_posix()
     except ValueError as exc:
-        raise ValueError(f"manifest is outside expected series path: {series_root}") from exc
+        raise ValueError(f"manifest 不在预期系列目录下：{series_root}") from exc
 
     series_entry = dict(creator_entry)
     series_entry["relative_path"] = series_relative
@@ -333,7 +402,7 @@ def rebuild_library_indexes(library: Path, *, dry_run: bool = False) -> dict[str
     ``manifest.json`` files, and stale ``_index.json`` files are removed
     when ``dry_run`` is false.
     """
-    print(f"[library] scanning: {library}", file=sys.stderr)
+    emit_log("library", f"开始扫描字幕库：{library}")
     now = datetime.now(timezone.utc).isoformat()
     existing_indexes = {path for path in library.rglob("_index.json") if path.is_file()}
     creator_videos: dict[tuple[str, str], list[dict[str, Any]]] = {}
@@ -347,15 +416,15 @@ def rebuild_library_indexes(library: Path, *, dry_run: bool = False) -> dict[str
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             if not isinstance(manifest, dict):
-                raise ValueError("manifest must be a JSON object")
+                raise ValueError("manifest 必须是 JSON 对象")
             if not is_completed(video_dir):
-                raise ValueError("manifest is incomplete or output files are missing")
+                raise ValueError("manifest 不完整，或输出文件缺失")
             platform = _required_text(manifest, "platform")
             uploader = _required_text(manifest, "uploader")
             series = normalize_series(manifest.get("series"))
             creator_entry, series_entry = _manifest_video_entries(library, manifest_path, manifest)
         except (OSError, json.JSONDecodeError, ValueError) as exc:
-            print(f"[index] skipped manifest ({manifest_path}): {exc}", file=sys.stderr)
+            emit_log("index", f"已跳过 manifest：{manifest_path}（{exc}）", level="warning")
             skipped.append({"path": str(manifest_path), "reason": str(exc)})
             continue
 
@@ -410,24 +479,24 @@ def rebuild_library_indexes(library: Path, *, dry_run: bool = False) -> dict[str
 
     stale_indexes = sorted(existing_indexes - set(desired_indexes))
     if dry_run:
-        print(
-            f"[index] dry-run: would write {len(desired_indexes)} indexes, remove {len(stale_indexes)} stale indexes",
-            file=sys.stderr,
+        emit_log(
+            "index",
+            f"Dry-run：将写入 {len(desired_indexes)} 个索引，移除 {len(stale_indexes)} 个过期索引",
         )
     else:
         for path, data in sorted(desired_indexes.items(), key=lambda item: str(item[0])):
             path.parent.mkdir(parents=True, exist_ok=True)
             write_json(path, data)
             if data.get("type") == "creator":
-                print(f"[index] rebuilt creator: {path}", file=sys.stderr)
+                emit_log("index", f"已重建创作者索引：{path}", level="success")
             else:
-                print(f"[index] rebuilt series: {path}", file=sys.stderr)
+                emit_log("index", f"已重建系列索引：{path}", level="success")
         for path in stale_indexes:
             try:
                 path.unlink()
-                print(f"[index] removed stale: {path}", file=sys.stderr)
+                emit_log("index", f"已移除过期索引：{path}", level="success")
             except OSError as exc:
-                print(f"[index] failed removing stale ({path}): {exc}", file=sys.stderr)
+                emit_log("index", f"移除过期索引失败：{path}（{exc}）", level="error")
 
     return {
         "status": "ok",

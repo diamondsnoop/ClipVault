@@ -299,22 +299,84 @@ select {
 /* ── Log Console ───────────────────────────────────────────────────── */
 
 .log-console {
-  background: var(--color-surface-dark);
-  color: var(--color-on-dark);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.65), rgba(255, 255, 255, 0.2)),
+    var(--color-surface-soft);
+  color: var(--color-ink);
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.6;
   border-radius: var(--radius-lg);
   padding: var(--spacing-lg);
+  border: 1px solid var(--color-hairline);
   max-height: 400px;
   overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-all;
 }
 
-.log-console .log-line { opacity: 0.85; }
+.log-console .log-line {
+  opacity: 0.95;
+  padding: 3px 0;
+  border-bottom: 1px dotted rgba(108, 106, 100, 0.18);
+}
+.log-console .log-line:last-child { border-bottom: 0; }
 .log-console .log-line.error { color: var(--color-error); }
 .log-console .log-line.success { color: var(--color-success); }
+.log-console .log-line.warning { color: #9c6a00; }
+
+.status-summary {
+  margin-bottom: var(--spacing-sm);
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  background: rgba(93, 184, 166, 0.1);
+  border: 1px solid rgba(93, 184, 166, 0.2);
+  color: var(--color-body-strong);
+  font-size: 14px;
+}
+
+.status-summary.success {
+  background: rgba(93, 184, 114, 0.12);
+  border-color: rgba(93, 184, 114, 0.28);
+}
+
+.status-summary.warning {
+  background: rgba(232, 165, 90, 0.12);
+  border-color: rgba(232, 165, 90, 0.28);
+}
+
+.status-summary.error {
+  background: rgba(198, 69, 69, 0.12);
+  border-color: rgba(198, 69, 69, 0.28);
+  color: #7b2424;
+}
+
+.action-row {
+  display: flex;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+  margin-bottom: var(--spacing-sm);
+}
+
+.detail-note {
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  background: rgba(93, 184, 166, 0.08);
+  border: 1px solid rgba(93, 184, 166, 0.22);
+  color: var(--color-body);
+  font-size: 14px;
+}
+
+.detail-note.warning {
+  background: rgba(232, 165, 90, 0.12);
+  border-color: rgba(232, 165, 90, 0.28);
+}
+
+.detail-note.error {
+  background: rgba(198, 69, 69, 0.12);
+  border-color: rgba(198, 69, 69, 0.28);
+  color: #7b2424;
+}
 
 /* ── Layout Helpers ────────────────────────────────────────────────── */
 

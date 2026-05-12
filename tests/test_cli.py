@@ -413,6 +413,46 @@ def test_process_video_records_actual_asr_device(monkeypatch):
         shutil.rmtree(tmp_path, ignore_errors=True)
 
 
+def test_process_video_failure_records_manifest_state(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        "clipvault.cli.extract_info",
+        lambda url, *, verbose, cookies=None: {"title": "T", "uploader": "U", "id": "vid-fail"},
+    )
+    monkeypatch.setattr(
+        "clipvault.cli.get_platform_subtitles",
+        lambda info, platform, cookies=None: ([SubtitleSegment(0.0, 1.0, "hello")], "subtitle:zh-CN:json3"),
+    )
+    monkeypatch.setattr(
+        "clipvault.cli.write_outputs",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("导出阶段失败")),
+    )
+
+    from clipvault.cli import process_video
+
+    with pytest.raises(RuntimeError, match="导出阶段失败"):
+        process_video(
+            url="https://www.bilibili.com/video/BV1fail",
+            library=tmp_path,
+            model_name="tiny",
+            device="cpu",
+            compute_type="int8",
+            force=True,
+            keep_audio=False,
+            verbose=False,
+        )
+
+    manifest_path = tmp_path / "bilibili" / "U" / "T - vid-fail" / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["processing_state"] == "failed"
+    assert manifest["last_error"] == "导出阶段失败"
+    assert manifest["failed_at"]
+    assert manifest["output_files"] == []
+    assert manifest["subtitle_source"] == "subtitle:zh-CN:json3"
+    assert manifest["subtitle_source_label"] == "平台字幕（zh-CN / json3）"
+    assert manifest["subtitle_source_detail"] == "已直接使用平台提供的字幕轨。"
+
+
 def test_process_video_stripped_series(tmp_path: Path, monkeypatch):
     """series=' Test Series ' is stripped, path uses 'Test Series', manifest writes 'Test Series'."""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/ffmpeg")

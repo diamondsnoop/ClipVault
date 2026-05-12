@@ -55,6 +55,57 @@ function parseDoneEvent(data) {
   return { status: String(data || "") };
 }
 
+function describeSource(source) {
+  const raw = String(source || "").trim();
+  if (!raw) return { label: "", detail: "" };
+  if (raw.startsWith("subtitle:")) {
+    const [, lang = "unknown", fmt = "unknown"] = raw.split(":", 3);
+    return { label: `平台字幕（${lang} / ${fmt}）`, detail: "已直接使用平台提供的字幕轨。" };
+  }
+  if (raw.startsWith("automatic_caption:")) {
+    const [, lang = "unknown", fmt = "unknown"] = raw.split(":", 3);
+    return { label: `平台自动字幕（${lang} / ${fmt}）`, detail: "已直接使用平台自动生成的字幕轨。" };
+  }
+  if (raw.startsWith("asr:")) {
+    const engine = raw.split(":", 2)[1] || "unknown";
+    return {
+      label: `本地 ASR（${engine}）`,
+      detail: "平台没有可下载字幕轨，已回退到本地 ASR。标题里的“中字/双语”可能只是画面硬字幕，不代表平台提供了字幕文件。",
+    };
+  }
+  return { label: raw, detail: "" };
+}
+
+function processingStateLabel(state) {
+  switch (String(state || "")) {
+    case "started": return "处理中";
+    case "completed": return "已完成";
+    case "failed": return "失败";
+    default: return state || "";
+  }
+}
+
+async function openLocalPath(path) {
+  return api("POST", "/open-path", { path });
+}
+
+function renderPathActions(container, items, onError) {
+  if (!container) return;
+  container.innerHTML = "";
+  for (const item of items) {
+    if (!item?.path || !item?.label) continue;
+    const btn = document.createElement("button");
+    btn.className = "btn-secondary btn-small";
+    btn.textContent = item.label;
+    btn.addEventListener("click", () => {
+      openLocalPath(item.path).catch((err) => {
+        if (typeof onError === "function") onError(err);
+      });
+    });
+    container.appendChild(btn);
+  }
+}
+
 function updateStatusSummary(el, parsed, fallback) {
   if (!el) return;
   const suffix = parsed?.message || fallback || "";
@@ -128,6 +179,8 @@ const videoLogArea = document.getElementById("video-log-area");
 const videoStatusSummary = document.getElementById("video-status-summary");
 const videoResult = document.getElementById("video-result");
 const videoResultCard = document.getElementById("video-result-card");
+const videoLogActions = document.getElementById("video-log-actions");
+let currentVideoLogDir = "";
 
 videoStart.addEventListener("click", startVideoJob);
 
@@ -146,6 +199,8 @@ async function startVideoJob() {
   videoLog.textContent = "";
   videoLogArea.style.display = "block";
   videoResult.style.display = "none";
+  currentVideoLogDir = "";
+  renderPathActions(videoLogActions, [], (err) => appendLogLine(videoLog, videoStatusSummary, "[错误][界面] " + err.message));
   updateStatusSummary(videoStatusSummary, null, "准备读取设置…");
 
   let settings = {};
@@ -173,7 +228,9 @@ async function startVideoJob() {
       return;
     }
     if (resp.log_dir) {
+      currentVideoLogDir = resp.log_dir;
       appendLogLine(videoLog, videoStatusSummary, "[界面] 任务日志目录：" + resp.log_dir);
+      renderPathActions(videoLogActions, [{ label: "打开任务日志", path: resp.log_dir }], (err) => appendLogLine(videoLog, videoStatusSummary, "[错误][界面] " + err.message));
     }
 
     const jobId = resp.job_id;
@@ -204,7 +261,9 @@ async function startVideoJob() {
       videoStart.disabled = false;
       videoStart.textContent = "开始处理";
       if (done.log_dir) {
+        currentVideoLogDir = done.log_dir;
         appendLogLine(videoLog, videoStatusSummary, "[界面] 任务日志目录：" + done.log_dir);
+        renderPathActions(videoLogActions, [{ label: "打开任务日志", path: done.log_dir }], (err) => appendLogLine(videoLog, videoStatusSummary, "[错误][界面] " + err.message));
       }
       if (done.status === "succeeded") {
         appendLogLine(videoLog, videoStatusSummary, "[成功][流程] 处理完成");
@@ -230,6 +289,8 @@ function showResult(data) {
   const platform = data.platform || "";
   const series = data.series || "";
   const source = data.source || "";
+  const sourceLabel = data.source_label || describeSource(source).label || source;
+  const sourceDetail = data.source_detail || describeSource(source).detail || "";
   const segments = data.segments ?? "";
   const asrModel = data.asr_model || "";
   const asrDevice = data.asr_device || "";
@@ -248,7 +309,7 @@ function showResult(data) {
     ["视频 ID", data.video_id],
     ["平台", platform],
     ["系列", series],
-    ["字幕来源", source],
+    ["字幕来源", sourceLabel],
     ["片段数", segments],
     ["ASR 模型", asrModel],
     ["ASR 设备", asrDevice],
@@ -260,10 +321,16 @@ function showResult(data) {
     }
   }
   html += '</table>';
+  if (sourceDetail) {
+    html += '<div class="detail-note' + (String(source).startsWith("asr:") ? ' warning' : '') + '">' + escapeHtml(sourceDetail) + '</div>';
+  }
 
   html += '<div class="flex-row" style="margin-top: 8px;">';
   if (folder) {
     html += '<button class="btn-secondary btn-small js-open-folder" data-path="' + escapeHtml(folder) + '">打开文件夹</button>';
+  }
+  if (currentVideoLogDir) {
+    html += '<button class="btn-secondary btn-small js-open-log" data-path="' + escapeHtml(currentVideoLogDir) + '">打开任务日志</button>';
   }
   html += '</div>';
   html += '</div>';
@@ -273,7 +340,11 @@ function showResult(data) {
 
   videoResultCard.querySelector(".js-open-folder")?.addEventListener("click", (e) => {
     const path = e.currentTarget.dataset.path;
-    api("POST", "/open-path", { path }).catch(err => appendLogLine(videoLog, videoStatusSummary, "[错误][界面] " + err.message));
+    openLocalPath(path).catch(err => appendLogLine(videoLog, videoStatusSummary, "[错误][界面] " + err.message));
+  });
+  videoResultCard.querySelector(".js-open-log")?.addEventListener("click", (e) => {
+    const path = e.currentTarget.dataset.path;
+    openLocalPath(path).catch(err => appendLogLine(videoLog, videoStatusSummary, "[错误][界面] " + err.message));
   });
 }
 
@@ -337,7 +408,8 @@ function renderLibraryTree(tree) {
 
 function buildVideoNode(v) {
   const source = String(v.subtitle_source || "");
-  const dotClass = source.startsWith("asr:") ? "warning" : v.has_transcript ? "success" : "";
+  const state = String(v.processing_state || "");
+  const dotClass = state === "failed" ? "error" : (source.startsWith("asr:") ? "warning" : v.has_transcript ? "success" : "");
   const label = document.createElement("span");
   const title = displayTitle(v.title || v.name);
   if (dotClass) {
@@ -433,7 +505,8 @@ async function selectVideo(video) {
       ["平台", manifest.platform],
       ["创作者", displayUploader(manifest.uploader)],
       ["系列", manifest.series],
-      ["字幕来源", manifest.subtitle_source],
+      ["处理状态", processingStateLabel(manifest.processing_state)],
+      ["字幕来源", manifest.subtitle_source_label || describeSource(manifest.subtitle_source).label || manifest.subtitle_source],
       ["时长", manifest.duration ? Math.floor(manifest.duration / 60) + "m" : ""],
       ["上传日期", manifest.upload_date],
       ["处理时间", manifest.processed_at],
@@ -445,6 +518,13 @@ async function selectVideo(video) {
       }
     }
     html += "</table>";
+    const sourceDetail = manifest.subtitle_source_detail || describeSource(manifest.subtitle_source).detail || "";
+    if (sourceDetail) {
+      html += '<div class="detail-note' + (String(manifest.subtitle_source || "").startsWith("asr:") ? ' warning' : '') + '">' + escapeHtml(sourceDetail) + '</div>';
+    }
+    if (manifest.last_error) {
+      html += '<div class="detail-note error">' + escapeHtml(String(manifest.last_error)) + '</div>';
+    }
     html += '<div class="flex-row" style="margin-top: 8px;">'
           + '<button class="btn-secondary btn-small js-open-folder" data-path="' + escapeHtml(video.relative_path) + '">打开文件夹</button>'
           + "</div>";
@@ -457,7 +537,7 @@ async function selectVideo(video) {
 
     libraryDetailEl.innerHTML = html;
     libraryDetailEl.querySelector(".js-open-folder")?.addEventListener("click", function () {
-      api("POST", "/open-path", { path: video.relative_path }).catch(err => {
+      openLocalPath(video.relative_path).catch(err => {
         libraryDetailEl.innerHTML = '<div class="card"><p style="color: var(--color-error);">' + escapeHtml(err.message) + "</p></div>";
       });
     });
@@ -596,6 +676,7 @@ const queueSimplifyChinese = document.getElementById("queue-simplify-chinese");
 const queueLogArea = document.getElementById("queue-log-area");
 const queueLog = document.getElementById("queue-log");
 const queueStatusSummary = document.getElementById("queue-status-summary");
+const queueLogActions = document.getElementById("queue-log-actions");
 
 let _queueFilter = "all";
 let _queueData = { jobs: [] };
@@ -713,6 +794,7 @@ async function startQueueRun() {
   queueRunBtn.textContent = "运行中...";
   queueLog.textContent = "";
   queueLogArea.style.display = "block";
+  renderPathActions(queueLogActions, [], (err) => appendQueueLog("[错误][界面] " + err.message));
   updateStatusSummary(queueStatusSummary, null, "准备启动队列…");
 
   try {
@@ -732,6 +814,7 @@ async function startQueueRun() {
     }
     if (resp.log_dir) {
       appendQueueLog("[界面] 任务日志目录：" + resp.log_dir);
+      renderPathActions(queueLogActions, [{ label: "打开任务日志", path: resp.log_dir }], (err) => appendQueueLog("[错误][界面] " + err.message));
     }
 
     const events = new EventSource("/api/process/events?job_id=" + encodeURIComponent(resp.job_id) + "&token=" + encodeURIComponent(TOKEN));
@@ -752,6 +835,7 @@ async function startQueueRun() {
       queueRunBtn.textContent = "运行队列";
       if (done.log_dir) {
         appendQueueLog("[界面] 任务日志目录：" + done.log_dir);
+        renderPathActions(queueLogActions, [{ label: "打开任务日志", path: done.log_dir }], (err) => appendQueueLog("[错误][界面] " + err.message));
       }
       if (done.status === "succeeded") {
         appendQueueLog("[成功][队列] 队列运行结束");

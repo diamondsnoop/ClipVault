@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from clipvault.library import (
     build_manifest,
     creator_index_path,
+    describe_subtitle_source,
     first_text,
     guess_platform,
     is_completed,
@@ -137,6 +140,26 @@ def test_write_json_and_update(tmp_path: Path):
     assert data == {"a": 1, "b": 2, "c": 3}
 
 
+def test_update_manifest_recovers_from_bad_json_with_fallback(tmp_path: Path):
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text("{bad", encoding="utf-8")
+
+    updated = update_manifest(manifest_path, fallback={"title": "T"}, subtitle_source="asr:faster-whisper")
+
+    assert updated["title"] == "T"
+    assert updated["subtitle_source"] == "asr:faster-whisper"
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert data["subtitle_source"] == "asr:faster-whisper"
+
+
+def test_update_manifest_bad_json_without_fallback_raises(tmp_path: Path):
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text("{bad", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="manifest JSON 无法解析"):
+        update_manifest(manifest_path, subtitle_source="subtitle:zh")
+
+
 # --- build_manifest ---
 
 
@@ -163,7 +186,12 @@ def test_build_manifest_nullable_fields():
     assert manifest["duration"] == 120
     assert manifest["upload_date"] == "20260101"
     assert manifest["description"] == "desc"
+    assert manifest["processing_state"] == "started"
+    assert manifest["failed_at"] is None
+    assert manifest["last_error"] is None
     assert manifest["subtitle_source"] is None
+    assert manifest["subtitle_source_label"] is None
+    assert manifest["subtitle_source_detail"] is None
     assert manifest["asr_model"] is None
     assert manifest["asr_device"] is None
     assert manifest["output_files"] == []
@@ -183,6 +211,19 @@ def test_build_manifest_blank_series_is_none():
     """Blank series in build_manifest is stored as None (normalized before call)."""
     manifest = build_manifest({}, url="https://example.com", title="T", uploader="U", video_id="V", series="   ")
     assert manifest["series"] is None
+
+
+def test_describe_subtitle_source_platform_subtitle():
+    label, detail = describe_subtitle_source("subtitle:zh-CN:json3")
+    assert label == "平台字幕（zh-CN / json3）"
+    assert detail == "已直接使用平台提供的字幕轨。"
+
+
+def test_describe_subtitle_source_asr_explains_hard_subtitle_case():
+    label, detail = describe_subtitle_source("asr:faster-whisper")
+    assert label == "本地 ASR（faster-whisper）"
+    assert detail is not None
+    assert "硬字幕" in detail
 
 
 # --- video_directory ---
@@ -279,6 +320,38 @@ def test_is_completed_false_when_subtitle_source_null(tmp_path: Path):
 def test_is_completed_false_when_subtitle_source_missing(tmp_path: Path):
     manifest = tmp_path / "manifest.json"
     write_json(manifest, {"title": "no source"})
+    assert not is_completed(tmp_path)
+
+
+def test_is_completed_false_when_processing_state_is_started(tmp_path: Path):
+    manifest = tmp_path / "manifest.json"
+    write_json(
+        manifest,
+        {
+            "processing_state": "started",
+            "subtitle_source": "subtitle:en:json3",
+            "output_files": ["transcript.srt", "transcript.txt", "transcript.md"],
+        },
+    )
+    (tmp_path / "transcript.srt").write_text("", encoding="utf-8")
+    (tmp_path / "transcript.txt").write_text("", encoding="utf-8")
+    (tmp_path / "transcript.md").write_text("", encoding="utf-8")
+    assert not is_completed(tmp_path)
+
+
+def test_is_completed_false_when_processing_state_is_failed(tmp_path: Path):
+    manifest = tmp_path / "manifest.json"
+    write_json(
+        manifest,
+        {
+            "processing_state": "failed",
+            "subtitle_source": "asr:faster-whisper",
+            "output_files": ["transcript.srt", "transcript.txt", "transcript.md"],
+        },
+    )
+    (tmp_path / "transcript.srt").write_text("", encoding="utf-8")
+    (tmp_path / "transcript.txt").write_text("", encoding="utf-8")
+    (tmp_path / "transcript.md").write_text("", encoding="utf-8")
     assert not is_completed(tmp_path)
 
 
@@ -814,7 +887,7 @@ def test_rebuild_indexes_skips_bad_manifest(tmp_path: Path, capsys):
     result = rebuild_library_indexes(tmp_path)
 
     stderr = capsys.readouterr().err
-    assert "skipped manifest" in stderr
+    assert "已跳过 manifest" in stderr
     assert len(result["skipped_manifests"]) == 1
     c_data = json.loads((tmp_path / "youtube" / "U" / "_index.json").read_text(encoding="utf-8"))
     assert [v["video_id"] for v in c_data["videos"]] == ["good"]
@@ -841,7 +914,7 @@ def test_rebuild_indexes_skips_manifest_missing_video_id(tmp_path: Path, capsys)
     result = rebuild_library_indexes(tmp_path)
 
     assert result["videos_indexed"] == 0
-    assert "missing required field: video_id" in capsys.readouterr().err
+    assert "缺少必填字段：video_id" in capsys.readouterr().err
     assert not (tmp_path / "youtube" / "U" / "_index.json").exists()
 
 

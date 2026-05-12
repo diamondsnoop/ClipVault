@@ -488,9 +488,13 @@ def _video_entry_from_dir(library: Path, video_dir: Path) -> dict[str, Any] | No
         "platform": manifest.get("platform", ""),
         "uploader": manifest.get("uploader", ""),
         "subtitle_source": manifest.get("subtitle_source"),
+        "subtitle_source_label": manifest.get("subtitle_source_label"),
+        "subtitle_source_detail": manifest.get("subtitle_source_detail"),
         "duration": manifest.get("duration"),
         "upload_date": manifest.get("upload_date"),
         "processed_at": manifest.get("processed_at", ""),
+        "processing_state": manifest.get("processing_state"),
+        "last_error": manifest.get("last_error"),
         "series": manifest.get("series"),
         "relative_path": str(video_dir.relative_to(library)),
         "has_transcript": (video_dir / "transcript.md").is_file(),
@@ -566,6 +570,25 @@ class ClipVaultHandler(http.server.BaseHTTPRequestHandler):
 
     def _validate_path_in_root(self, target_path: str) -> bool:
         return path_is_within_root(target_path, self._library_root())
+
+    def _allowed_open_roots(self) -> list[Path]:
+        roots = [
+            self._library_root(),
+            jobs_root_path(),
+            workspace_jobs_root_path(),
+        ]
+        unique: list[Path] = []
+        seen: set[str] = set()
+        for root in roots:
+            key = str(root.resolve())
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(root)
+        return unique
+
+    def _validate_openable_path(self, target_path: str) -> bool:
+        return any(path_is_within_root(target_path, root) for root in self._allowed_open_roots())
 
     def _send_json(self, data: Any, status: int = 200) -> None:
         body = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
@@ -718,8 +741,8 @@ class ClipVaultHandler(http.server.BaseHTTPRequestHandler):
             target = data.get("path", "")
             library_root = self._library_root()
             full_path = str((library_root / target).resolve()) if not os.path.isabs(target) else target
-            if not self._validate_path_in_root(full_path):
-                self._send_json({"status": "error", "message": "目标路径不在字幕库根目录内。"}, 403)
+            if not self._validate_openable_path(full_path):
+                self._send_json({"status": "error", "message": "目标路径不在允许的打开范围内。"}, 403)
                 return
             try:
                 os.startfile(full_path)

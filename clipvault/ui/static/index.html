@@ -43,11 +43,22 @@
             <option value="medium">medium</option>
             <option value="large-v3">large-v3</option>
           </select>
+          <select id="video-compute-type" class="text-input" style="width: auto;">
+            <option value="">计算类型（跟随设置）</option>
+            <option value="auto">auto</option>
+            <option value="int8">int8</option>
+            <option value="int8_float16">int8_float16</option>
+            <option value="float16">float16</option>
+            <option value="float32">float32</option>
+          </select>
           <label class="flex-row" style="cursor: pointer; white-space: nowrap;">
             <input type="checkbox" id="video-force" /> 强制重处理
           </label>
           <label class="flex-row" style="cursor: pointer; white-space: nowrap;">
             <input type="checkbox" id="video-keep-audio" /> 保留音频
+          </label>
+          <label class="flex-row" style="cursor: pointer; white-space: nowrap;">
+            <input type="checkbox" id="video-simplify-chinese" checked /> 中文转简
           </label>
         </div>
 
@@ -57,6 +68,8 @@
 
     <div id="video-log-area" style="display: none;">
       <h2 class="mt-lg mb-md">处理日志</h2>
+      <div id="video-status-summary" class="status-summary">等待任务开始</div>
+      <div id="video-log-actions" class="action-row"></div>
       <div id="video-log" class="log-console"></div>
     </div>
 
@@ -115,6 +128,9 @@
         <label class="flex-row" style="cursor: pointer; white-space: nowrap;">
           <input type="checkbox" id="queue-verbose" /> 详细日志
         </label>
+        <label class="flex-row" style="cursor: pointer; white-space: nowrap;">
+          <input type="checkbox" id="queue-simplify-chinese" checked /> 中文转简
+        </label>
         <button id="queue-run" class="btn-secondary btn-small">运行队列</button>
       </div>
     </div>
@@ -122,6 +138,8 @@
     <div id="queue-list"></div>
     <div id="queue-log-area" style="display: none;">
       <h2 class="mt-lg mb-md">运行日志</h2>
+      <div id="queue-status-summary" class="status-summary">等待任务开始</div>
+      <div id="queue-log-actions" class="action-row"></div>
       <div id="queue-log" class="log-console"></div>
     </div>
   </section>
@@ -146,7 +164,18 @@
           <option value="cuda">CUDA</option>
           <option value="cpu">CPU</option>
         </select>
-        <label>Cookies 文件路径</label>
+        <label>计算类型</label>
+        <select id="set-compute-type" class="text-input">
+          <option value="auto">auto</option>
+          <option value="int8">int8</option>
+          <option value="int8_float16">int8_float16</option>
+          <option value="float16">float16</option>
+          <option value="float32">float32</option>
+        </select>
+        <label class="flex-row" style="cursor: pointer; align-self: flex-start;">
+          <input type="checkbox" id="set-simplify-chinese" checked /> ASR 中文默认转简
+        </label>
+        <label>Cookie 文件路径</label>
         <input type="text" id="set-cookies" class="text-input" placeholder="可选" />
         <button id="settings-save" class="btn-primary" style="align-self: flex-start;">保存设置</button>
       </div>
