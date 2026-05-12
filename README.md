@@ -9,6 +9,7 @@ ClipVault 是一个本地优先的视频字幕库。它接收视频 URL，优先
 - 输入单个视频 URL 并处理字幕。
 - 优先使用平台字幕或自动字幕。
 - 没有字幕时回退到 `faster-whisper` 本地 ASR。
+- 支持把中文 ASR 结果默认转换为简体中文，也可显式关闭。
 - 自动选择 CUDA，失败时回退 CPU。
 - 导出 `transcript.srt`、`transcript.txt`、`transcript.md`。
 - 保存 `manifest.json`，用于缓存、索引和 UI 浏览。
@@ -191,6 +192,9 @@ library/<platform>/<creator>/<series>/<video title - id>/
 
 # 使用较小 ASR 模型
 .\clipvault.ps1 "https://www.bilibili.com/video/BV..." --model tiny
+
+# 关闭中文 ASR 结果转简
+.\clipvault.ps1 "https://www.bilibili.com/video/BV..." --no-simplify-chinese
 
 # 启动本地 Web UI
 .\clipvault.ps1 ui

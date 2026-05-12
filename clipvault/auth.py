@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import atexit
 import http.cookiejar
-import sys
 import urllib.request
 from pathlib import Path
 from typing import Any
 
 from .credentials import credentials_to_netscape, get_config_dir, get_auth_toml_path, read_credentials
+from .runtime_logs import emit_log
 
 _CLIPVAULT_AUTH_SENTINEL = "__clipvault_auth__"
 _COOKIE_FILE_NAME = "netscape_cookies.txt"
@@ -37,9 +37,9 @@ def resolve_cookies_path(cookies: Any) -> Path | None:
     path = Path(cookies)
     if not path.is_file():
         raise RuntimeError(
-            f"cookies file not found: {path}. "
-            "Use 'clipvault auth login' to store credentials, "
-            "or provide a valid Netscape cookies file path."
+            f"未找到 cookies 文件：{path}。"
+            "请先运行 `clipvault auth login` 保存凭据，"
+            "或提供有效的 Netscape cookies 文件路径。"
         )
     return path
 
@@ -53,15 +53,15 @@ def _resolve_clipvault_auth() -> Path:
     auth_toml = get_auth_toml_path()
     if not auth_toml.is_file():
         raise RuntimeError(
-            f"ClipVault auth file not found at {auth_toml}. "
-            "Use 'clipvault auth login' to store credentials."
+            f"未找到 ClipVault 凭据文件：{auth_toml}。"
+            "请先运行 `clipvault auth login` 保存凭据。"
         )
 
     credentials = read_credentials()
     if not credentials:
         raise RuntimeError(
-            f"No credentials found in {auth_toml}. "
-            "Use 'clipvault auth login' to store credentials."
+            f"在 {auth_toml} 中未找到任何凭据。"
+            "请先运行 `clipvault auth login` 保存凭据。"
         )
 
     # Write to config dir instead of system temp — controlled lifecycle
@@ -71,7 +71,7 @@ def _resolve_clipvault_auth() -> Path:
         encoding="utf-8",
     )
     _cached_clipvault_cookie_path = path
-    print(f"[auth] using ClipVault credentials from {auth_toml}", file=sys.stderr)
+    emit_log("auth", f"已从 ClipVault 凭据文件生成临时 cookies：{auth_toml}")
     return _cached_clipvault_cookie_path
 
 
@@ -91,7 +91,7 @@ def apply_ytdlp_cookies(opts: dict[str, Any], cookies: Any) -> None:
     if path is None:
         return
     opts["cookiefile"] = str(path)
-    print(f"[auth] cookies file: {path}", file=sys.stderr)
+    emit_log("auth", f"已启用 cookies 文件：{path}")
 
 
 def build_authenticated_opener(cookies: Any = None) -> urllib.request.OpenerDirector:
@@ -102,7 +102,7 @@ def build_authenticated_opener(cookies: Any = None) -> urllib.request.OpenerDire
         try:
             jar.load(ignore_discard=True, ignore_expires=True)
         except (http.cookiejar.LoadError, OSError) as exc:
-            raise RuntimeError(f"failed to load cookies file {path}: {exc}") from exc
+            raise RuntimeError(f"加载 cookies 文件失败：{path}（{exc}）") from exc
         handlers.append(urllib.request.HTTPCookieProcessor(jar))
-        print(f"[auth] cookies loaded for HTTP requests: {path}", file=sys.stderr)
+        emit_log("auth", f"HTTP 请求已加载 cookies：{path}")
     return urllib.request.build_opener(*handlers)

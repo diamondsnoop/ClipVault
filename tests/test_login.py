@@ -44,7 +44,7 @@ class TestGenerateQR:
             return _build_response(200, {"code": -1, "message": "error"})
         monkeypatch.setattr(mock_client, "get", fake_get)
 
-        with pytest.raises(RuntimeError, match="QR generate API error"):
+        with pytest.raises(RuntimeError, match="二维码生成接口返回错误"):
             _generate_qr_login(mock_client)
 
     def test_missing_data(self, mock_client, monkeypatch):
@@ -52,7 +52,7 @@ class TestGenerateQR:
             return _build_response(200, {"code": 0, "data": {}})
         monkeypatch.setattr(mock_client, "get", fake_get)
 
-        with pytest.raises(RuntimeError, match="missing url or qrcode_key"):
+        with pytest.raises(RuntimeError, match="缺少 url 或 qrcode_key"):
             _generate_qr_login(mock_client)
 
 
@@ -61,7 +61,7 @@ def test_show_qr_code_terminal_keeps_stdout_clean(capsys):
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "Scan this QR code" in captured.err
+    assert "请使用哔哩哔哩 App 扫描下方二维码登录" in captured.err
     assert "█" in captured.err
 
 
@@ -115,7 +115,7 @@ class TestPollQR:
             })
         monkeypatch.setattr(mock_client, "get", fake_get)
 
-        with pytest.raises(TimeoutError, match="QR code expired"):
+        with pytest.raises(TimeoutError, match="二维码已过期"):
             _poll_qr_login(mock_client, "key_123", poll_interval=0.01, timeout=10)
 
     def test_timeout(self, mock_client, monkeypatch):
@@ -126,7 +126,7 @@ class TestPollQR:
             })
         monkeypatch.setattr(mock_client, "get", fake_get)
 
-        with pytest.raises(TimeoutError, match="timed out"):
+        with pytest.raises(TimeoutError, match="等待超时"):
             _poll_qr_login(mock_client, "key_123", poll_interval=0.01, timeout=0.1)
 
 
@@ -229,5 +229,5 @@ class TestLoginBilibiliEndToEnd:
         monkeypatch.setattr(httpx.Client, "get", fake_get)
         monkeypatch.setattr("clipvault.login._show_qr_code", lambda url, mode: None)
 
-        with pytest.raises(RuntimeError, match="Failed to extract any credentials"):
+        with pytest.raises(RuntimeError, match="未能从登录响应中提取任何凭据"):
             login_bilibili(poll_interval=0.01, timeout=10)

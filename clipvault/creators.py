@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .library import is_completed, safe_name, write_json
 from .platforms import extract_creator_entries, identify_platform
+from .runtime_logs import emit_log
 
 
 CREATOR_REGISTRY_SCHEMA_VERSION = 1
@@ -35,7 +35,7 @@ def _record_id(platform: str, source_url: str) -> str:
 def _fallback_name(source_url: str) -> str:
     cleaned = source_url.strip().rstrip("/")
     if not cleaned:
-        return "unknown creator"
+        return "未知创作者"
     return safe_name(cleaned.split("/")[-1] or cleaned, max_length=80)
 
 
@@ -51,7 +51,7 @@ def load_creator_registry(library: Path) -> dict[str, Any]:
             "creators": [],
         }
     except (json.JSONDecodeError, OSError) as exc:
-        print(f"[creator] registry load failed ({path}): {exc}", file=sys.stderr)
+        emit_log("creator", f"读取创作者注册表失败：{path}（{exc}）", level="warning")
         return {
             "schema_version": CREATOR_REGISTRY_SCHEMA_VERSION,
             "type": "creator_registry",
@@ -59,7 +59,7 @@ def load_creator_registry(library: Path) -> dict[str, Any]:
             "creators": [],
         }
     if not isinstance(data, dict) or not isinstance(data.get("creators"), list):
-        print(f"[creator] invalid registry shape ({path}), starting empty", file=sys.stderr)
+        emit_log("creator", f"创作者注册表格式无效，将从空状态开始：{path}", level="warning")
         return {
             "schema_version": CREATOR_REGISTRY_SCHEMA_VERSION,
             "type": "creator_registry",
@@ -81,7 +81,7 @@ def load_job_queue(library: Path) -> dict[str, Any]:
             "jobs": [],
         }
     except (json.JSONDecodeError, OSError) as exc:
-        print(f"[queue] load failed ({path}): {exc}", file=sys.stderr)
+        emit_log("queue", f"读取任务队列失败：{path}（{exc}）", level="warning")
         return {
             "schema_version": JOB_QUEUE_SCHEMA_VERSION,
             "type": "transcript_job_queue",
@@ -89,7 +89,7 @@ def load_job_queue(library: Path) -> dict[str, Any]:
             "jobs": [],
         }
     if not isinstance(data, dict) or not isinstance(data.get("jobs"), list):
-        print(f"[queue] invalid queue shape ({path}), starting empty", file=sys.stderr)
+        emit_log("queue", f"任务队列格式无效，将从空状态开始：{path}", level="warning")
         return {
             "schema_version": JOB_QUEUE_SCHEMA_VERSION,
             "type": "transcript_job_queue",
@@ -115,7 +115,7 @@ def list_queue_jobs(library: Path, *, status: str | None = None) -> list[dict[st
     if status:
         jobs = [job for job in jobs if job.get("status") == status]
     jobs = sorted(jobs, key=lambda job: str(job.get("added_at") or ""))
-    print(f"[queue] listed: {len(jobs)}", file=sys.stderr)
+    emit_log("queue", f"已列出 {len(jobs)} 个任务")
     return jobs
 
 
@@ -125,7 +125,7 @@ def queue_status(library: Path) -> dict[str, Any]:
     for job in jobs:
         status = str(job.get("status") or "unknown")
         counts[status] = counts.get(status, 0) + 1
-    print(f"[queue] status: {counts}", file=sys.stderr)
+    emit_log("queue", f"当前任务统计：{counts}")
     return {
         "status": "ok",
         "total": len(jobs),
@@ -139,14 +139,14 @@ def list_creator_sources(library: Path) -> list[dict[str, Any]]:
         registry.get("creators", []),
         key=lambda item: (str(item.get("platform") or ""), str(item.get("name") or "")),
     )
-    print(f"[creator] listed: {len(creators)}", file=sys.stderr)
+    emit_log("creator", f"已列出 {len(creators)} 个创作者来源")
     return creators
 
 
 def find_creator_source(library: Path, selector: str) -> dict[str, Any]:
     selector = selector.strip()
     if not selector:
-        raise ValueError("creator selector is empty")
+        raise ValueError("创作者选择器不能为空")
 
     creators = load_creator_registry(library).get("creators", [])
     exact_id = [record for record in creators if record.get("id") == selector]
@@ -163,16 +163,16 @@ def find_creator_source(library: Path, selector: str) -> dict[str, Any]:
     if len(name_matches) == 1:
         return name_matches[0]
     if len(name_matches) > 1:
-        raise ValueError(f"creator selector is ambiguous: {selector}")
-    raise ValueError(f"creator source not found: {selector}")
+        raise ValueError(f"创作者选择器存在歧义：{selector}")
+    raise ValueError(f"未找到创作者来源：{selector}")
 
 
 def _processed_video_lookup(library: Path) -> tuple[set[str], set[str]]:
     indexed_ids, indexed_urls = _processed_video_lookup_from_indexes(library)
     if indexed_ids or indexed_urls:
-        print("[creator] processed lookup: indexes", file=sys.stderr)
+        emit_log("creator", "已通过索引判断视频是否处理过")
         return indexed_ids, indexed_urls
-    print("[creator] processed lookup: manifests", file=sys.stderr)
+    emit_log("creator", "索引不可用，回退到 manifest 扫描", level="warning")
     return _processed_video_lookup_from_manifests(library)
 
 
@@ -183,7 +183,7 @@ def _processed_video_lookup_from_indexes(library: Path) -> tuple[set[str], set[s
         try:
             data = json.loads(index_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            print(f"[creator] index lookup skipped ({index_path}): {exc}", file=sys.stderr)
+            emit_log("creator", f"已跳过损坏索引：{index_path}（{exc}）", level="warning")
             continue
         if not isinstance(data, dict) or data.get("type") != "creator":
             continue
@@ -231,11 +231,11 @@ def fetch_creator_videos(
     cookies: Path | str | None = None,
 ) -> dict[str, Any]:
     if limit < 1:
-        raise ValueError("limit must be at least 1")
+        raise ValueError("limit 至少为 1")
 
     registry = load_creator_registry(library)
     record = find_creator_source(library, selector)
-    print(f"[creator] fetching: {record.get('name')} ({record.get('platform')})", file=sys.stderr)
+    emit_log("creator", f"开始抓取：{record.get('name')} ({record.get('platform')})")
     entries = extract_creator_entries(str(record["source_url"]), limit=limit, verbose=verbose, cookies=cookies)
     processed_ids, processed_urls = _processed_video_lookup(library)
     annotated_entries: list[dict[str, Any]] = []
@@ -251,7 +251,7 @@ def fetch_creator_videos(
         annotated_entries.append(annotated)
     new_count = sum(1 for entry in annotated_entries if entry["library_status"] == "new")
     processed_count = len(annotated_entries) - new_count
-    print(f"[creator] candidates: {new_count} new, {processed_count} processed", file=sys.stderr)
+    emit_log("creator", f"候选结果：{new_count} 个新视频，{processed_count} 个已处理", level="success")
 
     now = _now()
     for item in registry.get("creators", []):
@@ -317,11 +317,12 @@ def enqueue_creator_videos(
         added.append(job)
 
     path = write_job_queue(library, queue)
-    print(
-        f"[queue] added: {len(added)}, skipped processed: {skipped_processed}, skipped existing: {skipped_existing}",
-        file=sys.stderr,
+    emit_log(
+        "queue",
+        f"已加入 {len(added)} 个任务，跳过已处理 {skipped_processed} 个，跳过已存在 {skipped_existing} 个",
+        level="success",
     )
-    print(f"[queue] path: {path}", file=sys.stderr)
+    emit_log("queue", f"队列文件路径：{path}")
     return {
         "status": "ok",
         "queue": str(path),
@@ -335,11 +336,11 @@ def enqueue_creator_videos(
 def add_creator_source(library: Path, *, source_url: str, name: str | None = None) -> dict[str, Any]:
     source_url = source_url.strip().rstrip("/")
     if not source_url:
-        raise ValueError("creator source URL is empty")
+        raise ValueError("创作者来源 URL 不能为空")
 
     platform = identify_platform(source_url)
     if platform == "unknown":
-        raise ValueError(f"unsupported or unknown creator platform: {source_url}")
+        raise ValueError(f"不支持或无法识别的创作者平台：{source_url}")
 
     registry = load_creator_registry(library)
     record_id = _record_id(platform, source_url)
@@ -376,6 +377,7 @@ def add_creator_source(library: Path, *, source_url: str, name: str | None = Non
     path = creator_registry_path(library)
     path.parent.mkdir(parents=True, exist_ok=True)
     write_json(path, registry)
-    print(f"[creator] {action}: {display_name} ({platform})", file=sys.stderr)
-    print(f"[creator] registry: {path}", file=sys.stderr)
+    action_label = "已更新" if action == "updated" else "已添加"
+    emit_log("creator", f"{action_label}创作者来源：{display_name} ({platform})", level="success")
+    emit_log("creator", f"注册表路径：{path}")
     return record

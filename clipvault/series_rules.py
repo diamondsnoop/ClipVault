@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 import re
-import sys
 from pathlib import Path
 from typing import Any
 
 from .library import normalize_series, safe_name
+from .runtime_logs import emit_log
 
 
 def series_rules_path(library: Path, *, platform: str, uploader: str) -> Path:
@@ -26,15 +26,15 @@ def load_series_rules(path: Path) -> list[dict[str, Any]] | None:
     except FileNotFoundError:
         return None
     except (json.JSONDecodeError, OSError) as exc:
-        print(f"[series] rule load failed ({path}): {exc}", file=sys.stderr)
+        emit_log("series", f"读取规则文件失败：{path}（{exc}）", level="warning")
         return None
 
     if not isinstance(data, dict):
-        print(f"[series] invalid rules file ({path}): expected object", file=sys.stderr)
+        emit_log("series", f"规则文件格式无效：{path}（顶层必须是对象）", level="warning")
         return None
     rules = data.get("rules", [])
     if not isinstance(rules, list):
-        print(f"[series] invalid rules file ({path}): rules must be a list", file=sys.stderr)
+        emit_log("series", f"规则文件格式无效：{path}（rules 必须是数组）", level="warning")
         return None
     return rules
 
@@ -46,7 +46,7 @@ def match_series_from_title(title: str, rules: list[dict[str, Any]]) -> str | No
     """
     for rule in rules:
         if not isinstance(rule, dict):
-            print("[series] invalid rule skipped: expected object", file=sys.stderr)
+            emit_log("series", "已跳过无效规则：规则项必须是对象", level="warning")
             continue
         series = normalize_series(rule.get("series"))
         if not series:
@@ -69,7 +69,7 @@ def match_series_from_title(title: str, rules: list[dict[str, Any]]) -> str | No
                 if re.search(regex_str, title):
                     has_regex = True
             except re.error as exc:
-                print(f"[series] invalid regex in rule '{series}': {exc}", file=sys.stderr)
+                emit_log("series", f"规则 “{series}” 的正则无效：{exc}", level="warning")
                 continue
 
         if not has_contains and not has_regex:
@@ -104,7 +104,7 @@ def resolve_series(
 
     matched = match_series_from_title(title, rules)
     if matched:
-        print(f"[series] auto: {matched}", file=sys.stderr)
+        emit_log("series", f"自动匹配到系列：{matched}", level="success")
         return matched, "rule"
 
     return None, None

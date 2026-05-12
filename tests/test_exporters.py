@@ -95,8 +95,12 @@ def test_to_markdown():
     assert "UP主：TestCreator" in result
     assert "视频ID：VID001" in result
     assert "字幕来源：subtitle:en:json3" in result
+    assert "片段数：3" in result
     assert "## 字幕正文" in result
-    assert "`00:01` 大家好 欢迎收看本期视频" in result
+    assert "`00:01`" not in result
+    assert "- `" not in result
+    assert "大家好 欢迎收看本期视频 今天我们来聊一个有趣的话题" in result
+    assert "\n\n第三段内容\n" in result
     assert result.endswith("\n")
 
 
@@ -111,4 +115,22 @@ def test_to_markdown_empty_segments():
     )
     assert "# Empty" in result
     assert "## 字幕正文" in result
-    assert result.count("- `") == 0
+    assert "（无字幕正文）" in result
+
+
+def test_to_markdown_paragraph_breaks_on_sentence_gap():
+    result = to_markdown(
+        title="Split",
+        uploader="U",
+        url="https://example.com",
+        video_id="S",
+        source="asr:faster-whisper",
+        segments=[
+            SubtitleSegment(start=0.0, end=2.0, text="第一句。"),
+            SubtitleSegment(start=4.0, end=6.0, text="第二句继续。"),
+            SubtitleSegment(start=11.0, end=13.0, text="第三段。"),
+        ],
+    )
+
+    assert "第一句。 第二句继续。" in result
+    assert "\n\n第三段。\n" in result

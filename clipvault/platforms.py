@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +7,14 @@ from yt_dlp import YoutubeDL
 
 from .auth import apply_ytdlp_cookies
 from .adapters import PLATFORMS, adapter_for_url, identify_platform, platform_languages
+from .runtime_logs import emit_log
+
+
+def _display_text(value: Any, fallback: str) -> str:
+    text = str(value or "").strip()
+    if not text or text in {"untitled", "unknown", "unknown-uploader", "unknown-id"}:
+        return fallback
+    return text
 
 
 def _flat_entry_url(entry: dict[str, Any], *, source_url: str) -> str | None:
@@ -16,7 +23,7 @@ def _flat_entry_url(entry: dict[str, Any], *, source_url: str) -> str | None:
 
 
 def extract_info(url: str, *, verbose: bool, cookies: Path | str | None = None) -> dict[str, Any]:
-    print(f"[metadata] extracting info for {url}", file=sys.stderr)
+    emit_log("metadata", f"开始提取视频信息：{url}")
     opts: dict[str, Any] = {
         "quiet": not verbose,
         "no_warnings": not verbose,
@@ -30,14 +37,14 @@ def extract_info(url: str, *, verbose: bool, cookies: Path | str | None = None) 
             info = ydl.extract_info(url, download=False)
     except Exception as exc:
         raise RuntimeError(
-            f"Failed to fetch video metadata from {url}. Check the URL and your network connection. "
-            f"If the URL is correct, yt-dlp may need an update: pip install -U yt-dlp"
+            f"获取视频元数据失败：{url}。请检查链接、网络连接，"
+            "并确认 yt-dlp 是否需要更新：`pip install -U yt-dlp`。"
         ) from exc
     if not isinstance(info, dict):
-        raise RuntimeError(f"yt-dlp did not return video metadata for {url}.")
-    title = info.get("title", "untitled")
-    uploader = info.get("uploader", "unknown")
-    print(f"[metadata] ok: \"{title}\" by {uploader}", file=sys.stderr)
+        raise RuntimeError(f"yt-dlp 没有返回可用的视频元数据：{url}。")
+    title = _display_text(info.get("title"), "未命名视频")
+    uploader = _display_text(info.get("uploader"), "未知创作者")
+    emit_log("metadata", f"元数据提取成功：{title} / {uploader}", level="success")
     return info
 
 
@@ -48,7 +55,7 @@ def extract_creator_entries(
     verbose: bool,
     cookies: Path | str | None = None,
 ) -> list[dict[str, Any]]:
-    print(f"[creator] fetching recent entries from {url}", file=sys.stderr)
+    emit_log("creator", f"开始抓取创作者最近条目：{url}")
     opts: dict[str, Any] = {
         "quiet": not verbose,
         "no_warnings": not verbose,
@@ -64,11 +71,11 @@ def extract_creator_entries(
             info = ydl.extract_info(url, download=False)
     except Exception as exc:
         raise RuntimeError(
-            f"Failed to fetch creator entries from {url}. Check the URL, network connection, "
-            f"and whether yt-dlp supports this creator page."
+            f"抓取创作者条目失败：{url}。请检查链接、网络连接，"
+            "并确认 yt-dlp 是否支持该创作者页面。"
         ) from exc
     if not isinstance(info, dict):
-        raise RuntimeError(f"yt-dlp did not return creator metadata for {url}.")
+        raise RuntimeError(f"yt-dlp 没有返回可用的创作者元数据：{url}。")
     raw_entries = info.get("entries") or []
     entries: list[dict[str, Any]] = []
     for entry in raw_entries:
@@ -86,12 +93,12 @@ def extract_creator_entries(
         })
         if len(entries) >= limit:
             break
-    print(f"[creator] discovered: {len(entries)}", file=sys.stderr)
+    emit_log("creator", f"已发现 {len(entries)} 个候选条目", level="success")
     return entries
 
 
 def download_audio(url: str, video_dir: Path, *, verbose: bool, cookies: Path | str | None = None) -> Path:
-    print(f"[audio] downloading audio from {url}", file=sys.stderr)
+    emit_log("audio", f"开始下载音频：{url}")
     output = str(video_dir / "source_audio.%(ext)s")
     opts: dict[str, Any] = {
         "format": "bestaudio/best",
@@ -114,8 +121,8 @@ def download_audio(url: str, video_dir: Path, *, verbose: bool, cookies: Path | 
     matches = sorted(video_dir.glob("source_audio.*"))
     if not matches:
         raise RuntimeError(
-            "Audio download finished, but no source_audio file was found. "
-            "Check that ffmpeg is installed and available on PATH."
+            "音频下载流程已结束，但没有找到 source_audio 文件。"
+            "请确认 ffmpeg 已安装并且可从 PATH 调用。"
         )
-    print(f"[audio] saved to {matches[0]}", file=sys.stderr)
+    emit_log("audio", f"音频已保存到：{matches[0]}", level="success")
     return matches[0]

@@ -48,7 +48,7 @@ def test_load_rules_bad_json(tmp_path: Path, capsys):
     result = load_series_rules(rules_file)
     assert result is None
     stderr = capsys.readouterr().err
-    assert "rule load failed" in stderr
+    assert "读取规则文件失败" in stderr
 
 
 def test_load_rules_not_a_dict(tmp_path: Path):
@@ -130,7 +130,7 @@ def test_match_invalid_regex_skipped(capsys):
     result = match_series_from_title("hello world", rules)
     assert result == "Good"
     stderr = capsys.readouterr().err
-    assert "invalid regex" in stderr
+    assert "正则无效" in stderr
 
 
 def test_match_contains_and_regex_both_work():
@@ -182,7 +182,7 @@ def test_resolve_auto_match(tmp_path: Path, capsys):
     assert series == "Auto"
     assert source == "rule"
     stderr = capsys.readouterr().err
-    assert "auto: Auto" in stderr
+    assert "自动匹配到系列：Auto" in stderr
 
 
 def test_resolve_no_match(tmp_path: Path):
@@ -248,7 +248,7 @@ def test_match_skips_non_dict_rule_log(capsys):
     ]
     match_series_from_title("hello world", rules)
     stderr = capsys.readouterr().err
-    assert "invalid rule skipped" in stderr
+    assert "已跳过无效规则" in stderr
 
 
 def test_match_various_non_dict_items_never_crash():
@@ -272,7 +272,7 @@ def test_load_rules_not_a_dict_logs(tmp_path: Path, capsys):
     rules_file.write_text("[]", encoding="utf-8")
     assert load_series_rules(rules_file) is None
     stderr = capsys.readouterr().err
-    assert "expected object" in stderr
+    assert "顶层必须是对象" in stderr
 
 
 def test_load_rules_not_a_list_logs(tmp_path: Path, capsys):
@@ -284,7 +284,7 @@ def test_load_rules_not_a_list_logs(tmp_path: Path, capsys):
     )
     assert load_series_rules(rules_file) is None
     stderr = capsys.readouterr().err
-    assert "rules must be a list" in stderr
+    assert "rules 必须是数组" in stderr
 
 
 def test_resolve_series_with_malformed_rule(tmp_path: Path, capsys):
@@ -307,4 +307,4 @@ def test_resolve_series_with_malformed_rule(tmp_path: Path, capsys):
     assert series == "Good"
     assert source == "rule"
     stderr = capsys.readouterr().err
-    assert "invalid rule skipped" in stderr
+    assert "已跳过无效规则" in stderr

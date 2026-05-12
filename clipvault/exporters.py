@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from .models import SubtitleSegment
@@ -50,13 +51,90 @@ def to_markdown(
         f"- UP主：{uploader}",
         f"- 视频ID：{video_id}",
         f"- 字幕来源：{source}",
+        f"- 片段数：{len(segments)}",
         "",
         "## 字幕正文",
         "",
     ]
-    lines.extend(f"- `{format_clock(seg.start)}` {seg.text}" for seg in segments)
-    lines.append("")
+    paragraphs = to_markdown_paragraphs(segments)
+    if paragraphs:
+        for paragraph in paragraphs:
+            lines.append(paragraph)
+            lines.append("")
+    else:
+        lines.append("（无字幕正文）")
+        lines.append("")
     return "\n".join(lines)
+
+
+def to_markdown_paragraphs(
+    segments: list[SubtitleSegment],
+    *,
+    paragraph_gap_seconds: float = 4.0,
+    sentence_gap_seconds: float = 3.0,
+    max_paragraph_chars: int = 180,
+) -> list[str]:
+    paragraphs: list[str] = []
+    current_parts: list[str] = []
+    current_chars = 0
+    previous_end: float | None = None
+
+    for segment in segments:
+        text = segment.text.strip()
+        if not text:
+            continue
+
+        gap = None if previous_end is None else max(0.0, segment.start - previous_end)
+        if current_parts and _should_start_new_paragraph(
+            current_text=current_parts[-1],
+            current_chars=current_chars,
+            gap_seconds=gap,
+            paragraph_gap_seconds=paragraph_gap_seconds,
+            sentence_gap_seconds=sentence_gap_seconds,
+            max_paragraph_chars=max_paragraph_chars,
+        ):
+            paragraphs.append(_merge_paragraph_parts(current_parts))
+            current_parts = []
+            current_chars = 0
+
+        current_parts.append(text)
+        current_chars += len(text)
+        previous_end = segment.end
+
+    if current_parts:
+        paragraphs.append(_merge_paragraph_parts(current_parts))
+
+    return paragraphs
+
+
+def _should_start_new_paragraph(
+    *,
+    current_text: str,
+    current_chars: int,
+    gap_seconds: float | None,
+    paragraph_gap_seconds: float,
+    sentence_gap_seconds: float,
+    max_paragraph_chars: int,
+) -> bool:
+    if gap_seconds is None:
+        return False
+    if gap_seconds >= paragraph_gap_seconds:
+        return True
+    if current_chars >= max_paragraph_chars:
+        return True
+    return gap_seconds >= sentence_gap_seconds and _ends_sentence(current_text)
+
+
+def _merge_paragraph_parts(parts: list[str]) -> str:
+    merged = " ".join(part.strip() for part in parts if part.strip())
+    merged = re.sub(r"\s+([，。！？；：、,.!?;:])", r"\1", merged)
+    merged = re.sub(r"([（《“])\s+", r"\1", merged)
+    merged = re.sub(r"\s+([）》”])", r"\1", merged)
+    return merged.strip()
+
+
+def _ends_sentence(text: str) -> bool:
+    return text.rstrip().endswith(("。", "！", "？", ".", "!", "?"))
 
 
 def format_srt_time(seconds: float) -> str:

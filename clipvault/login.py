@@ -9,6 +9,7 @@ import httpx
 
 from .auth import clear_cookie_cache
 from .credentials import PLATFORM_CREDENTIAL_KEYS, remove_credential, store_credential
+from .runtime_logs import emit_log
 
 QR_GENERATE_API = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
 QR_POLL_API = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
@@ -55,19 +56,23 @@ def login_bilibili(
     if bili_jct:
         creds["bili_jct"] = bili_jct
     if not creds:
-        raise RuntimeError("Failed to extract any credentials from the login response.")
+        raise RuntimeError("未能从登录响应中提取任何凭据。")
     path = store_credential("bilibili", **creds)
-    print(f"[auth] credentials saved to {path}", file=sys.stderr)
+    emit_log("auth", f"凭据已保存到：{path}", level="success")
 
     # Step 6: validate session
     info = validate_bilibili_session(sessdata, bili_jct)
     if info.get("is_login"):
-        print(f"[auth] logged in as {info.get('user_name', 'unknown')}", file=sys.stderr)
+        emit_log("auth", f"已登录账号：{info.get('user_name', '未知用户')}", level="success")
     else:
         raw = info.get("_raw_response")
-        print(f"[auth] WARNING: credentials saved but session validation failed. "
-              f"API response: isLogin={raw.get('isLogin') if raw else 'N/A'}, "
-              f"uname={info.get('user_name')}", file=sys.stderr)
+        emit_log(
+            "auth",
+            "凭据已保存，但会话校验失败。"
+            f"API 返回：isLogin={raw.get('isLogin') if raw else 'N/A'}，"
+            f"uname={info.get('user_name')}",
+            level="warning",
+        )
 
     return {
         "status": "ok",
@@ -83,11 +88,11 @@ def _generate_qr_login(client: httpx.Client) -> tuple[str, str]:
     resp.raise_for_status()
     data = resp.json()
     if data.get("code") != 0:
-        raise RuntimeError(f"QR generate API error: {data}")
+        raise RuntimeError(f"二维码生成接口返回错误：{data}")
     url = data.get("data", {}).get("url")
     key = data.get("data", {}).get("qrcode_key")
     if not url or not key:
-        raise RuntimeError(f"QR generate response missing url or qrcode_key: {data}")
+        raise RuntimeError(f"二维码生成响应缺少 url 或 qrcode_key：{data}")
     return url, key
 
 
@@ -101,10 +106,10 @@ def _show_qr_code(url: str, mode: str = "terminal") -> None:
             qr.show()
             return
         except Exception:
-            print("[auth] browser QR display failed, falling back to terminal", file=sys.stderr)
+            emit_log("auth", "浏览器二维码展示失败，回退到终端输出", level="warning")
 
     # Terminal mode: render as block characters
-    print("\nScan this QR code with the Bilibili app to log in:\n", file=sys.stderr)
+    emit_log("auth", "请使用哔哩哔哩 App 扫描下方二维码登录")
     qr.terminal(out=sys.stderr, compact=True)
     print(file=sys.stderr)
 
@@ -119,7 +124,7 @@ def _poll_qr_login(
     deadline = time.monotonic() + timeout
     while True:
         if time.monotonic() > deadline:
-            raise TimeoutError("QR code login timed out. Please try again.")
+            raise TimeoutError("二维码登录等待超时，请重试。")
 
         resp = client.get(QR_POLL_API, params={"qrcode_key": qrcode_key, "source": "main-fe-header"})
         resp.raise_for_status()
@@ -128,20 +133,20 @@ def _poll_qr_login(
         status = data.get("code")
 
         if status == QR_STATUS_NOT_SCANNED:
-            print("[auth] waiting for QR code scan...", file=sys.stderr)
+            emit_log("auth", "等待扫码中…")
         elif status == QR_STATUS_SCANNED:
-            print("[auth] QR code scanned, waiting for confirmation on phone...", file=sys.stderr)
+            emit_log("auth", "已扫码，等待手机确认…")
         elif status == QR_STATUS_CONFIRMED:
             redirect_url = data.get("url", "")
             if not redirect_url:
-                raise RuntimeError("Login confirmed but no redirect URL received.")
+                raise RuntimeError("登录已确认，但没有收到跳转 URL。")
             return redirect_url
         elif status == QR_STATUS_EXPIRED:
             raise TimeoutError(
-                "QR code expired. Please run 'clipvault auth login' again to get a new QR code."
+                "二维码已过期，请重新运行 `clipvault auth login` 获取新的二维码。"
             )
         else:
-            print(f"[auth] unknown QR status: {status}", file=sys.stderr)
+            emit_log("auth", f"收到未知二维码状态：{status}", level="warning")
 
         time.sleep(poll_interval)
 
@@ -226,7 +231,7 @@ def validate_bilibili_session(sessdata: str | None, bili_jct: str | None) -> dic
             "_raw_response": nav_data,
         }
     except (httpx.HTTPError, ValueError) as exc:
-        print(f"[auth] session validation request failed: {exc}", file=sys.stderr)
+        emit_log("auth", f"会话校验请求失败：{exc}", level="warning")
         return {"is_login": False, "user_name": None, "error": str(exc), "_raw_response": None}
 
 
@@ -234,6 +239,6 @@ def logout_bilibili() -> dict[str, Any]:
     """Remove Bilibili credentials and clear cached cookie file."""
     removed = remove_credential("bilibili")
     if not removed:
-        return {"status": "error", "message": "No Bilibili credentials found."}
+        return {"status": "error", "message": "未找到哔哩哔哩已保存凭据。"}
     clear_cookie_cache()
     return {"status": "ok", "platform": "bilibili"}

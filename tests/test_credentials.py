@@ -110,12 +110,12 @@ def test_store_credential_update_existing():
 
 
 def test_store_credential_unknown_platform():
-    with pytest.raises(ValueError, match="unknown platform"):
+    with pytest.raises(ValueError, match="未知平台"):
         store_credential("unknown_platform", key="val")
 
 
 def test_store_credential_unknown_key():
-    with pytest.raises(ValueError, match="unknown credential key"):
+    with pytest.raises(ValueError, match="不支持凭据字段"):
         store_credential("bilibili", unknown_key="val")
 
 

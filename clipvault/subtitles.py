@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-import sys
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -10,6 +9,7 @@ from typing import Any
 from .auth import build_authenticated_opener
 from .models import SubtitleSegment
 from .platforms import platform_languages
+from .runtime_logs import emit_log
 from .text import clean_text, strip_tags
 
 # Default language priority used when no platform context is available.
@@ -31,7 +31,7 @@ def get_platform_subtitles(
     cookies: Path | str | None = None,
 ) -> tuple[list[SubtitleSegment], str]:
     priorities = platform_languages(platform)
-    print(f"[subtitle] language priority: {', '.join(priorities)}", file=sys.stderr)
+    emit_log("subtitle", f"字幕语言优先级：{', '.join(priorities)}")
 
     tracks = []
     for source_name, field in (("subtitle", "subtitles"), ("automatic_caption", "automatic_captions")):
@@ -53,11 +53,11 @@ def get_platform_subtitles(
             segments = parse_subtitle(raw, entry.get("ext") or "")
             if segments:
                 source_desc = f"{source_name}:{lang}:{entry.get('ext') or 'unknown'}"
-                print(f"[subtitle] found {len(segments)} segments from {source_desc}", file=sys.stderr)
+                emit_log("subtitle", f"已从 {source_desc} 获取 {len(segments)} 个片段", level="success")
                 return segments, source_desc
         except Exception:
             continue
-    print("[subtitle] no platform subtitles available", file=sys.stderr)
+    emit_log("subtitle", "当前平台没有可用字幕", level="warning")
     return [], "none"
 
 

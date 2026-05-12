@@ -65,7 +65,7 @@ def test_add_creator_source_normalizes_trailing_slash(tmp_path: Path):
 
 
 def test_add_creator_source_rejects_unknown_platform(tmp_path: Path):
-    with pytest.raises(ValueError, match="unknown creator platform"):
+    with pytest.raises(ValueError, match="不支持或无法识别的创作者平台"):
         add_creator_source(tmp_path, source_url="https://example.com/u/test")
 
 
@@ -85,7 +85,7 @@ def test_invalid_registry_shape_is_non_blocking(tmp_path: Path, capsys):
     registry = load_creator_registry(tmp_path)
 
     assert registry["creators"] == []
-    assert "invalid registry shape" in capsys.readouterr().err
+    assert "创作者注册表格式无效" in capsys.readouterr().err
 
 
 def test_find_creator_source_by_id_name_and_url(tmp_path: Path):
@@ -192,7 +192,7 @@ def test_fetch_creator_videos_uses_creator_index_for_processed_lookup(tmp_path: 
     result = fetch_creator_videos(tmp_path, selector="Jabzy", limit=2)
 
     assert [entry["library_status"] for entry in result["entries"]] == ["processed", "new"]
-    assert "processed lookup: indexes" in capsys.readouterr().err
+    assert "已通过索引判断视频是否处理过" in capsys.readouterr().err
 
 
 def test_fetch_creator_videos_rejects_bad_limit(tmp_path: Path):
@@ -271,4 +271,4 @@ def test_load_job_queue_invalid_shape_is_non_blocking(tmp_path: Path, capsys):
     queue = load_job_queue(tmp_path)
 
     assert queue["jobs"] == []
-    assert "invalid queue shape" in capsys.readouterr().err
+    assert "任务队列格式无效" in capsys.readouterr().err

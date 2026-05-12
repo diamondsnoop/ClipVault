@@ -97,13 +97,15 @@ def write_credentials(data: dict[str, dict[str, str]]) -> Path:
 def store_credential(platform: str, **kwargs: str) -> Path:
     known = PLATFORM_CREDENTIAL_KEYS.get(platform)
     if known is None:
-        raise ValueError(f"unknown platform: {platform} (supported: {', '.join(PLATFORM_CREDENTIAL_KEYS)})")
+        raise ValueError(
+            f"未知平台：{platform}（支持的平台：{', '.join(PLATFORM_CREDENTIAL_KEYS)}）"
+        )
 
     for key in kwargs:
         if key not in known:
             raise ValueError(
-                f"unknown credential key '{key}' for platform '{platform}'. "
-                f"Expected one of: {', '.join(known)}"
+                f"平台 {platform} 不支持凭据字段 “{key}”。"
+                f"可用字段：{', '.join(known)}"
             )
 
     credentials = read_credentials()

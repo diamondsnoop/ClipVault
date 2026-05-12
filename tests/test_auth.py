@@ -47,7 +47,7 @@ def test_resolve_cookies_path_auto_generates_cookie_file(tmp_path: Path, monkeyp
 def test_resolve_cookies_path_auto_missing_file(tmp_path: Path, monkeypatch):
     monkeypatch.setattr("clipvault.credentials.get_config_dir", lambda: tmp_path)
 
-    with pytest.raises(RuntimeError, match="ClipVault auth file not found"):
+    with pytest.raises(RuntimeError, match="未找到 ClipVault 凭据文件"):
         resolve_cookies_path(AUTH_SENTINEL)
 
 
@@ -56,7 +56,7 @@ def test_resolve_cookies_path_auto_empty_credentials(tmp_path: Path, monkeypatch
     auth_toml.write_text("# empty\n", encoding="utf-8")
     monkeypatch.setattr("clipvault.credentials.get_config_dir", lambda: tmp_path)
 
-    with pytest.raises(RuntimeError, match="No credentials found"):
+    with pytest.raises(RuntimeError, match="未找到任何凭据"):
         resolve_cookies_path(AUTH_SENTINEL)
 
 
@@ -83,7 +83,7 @@ def test_resolve_cookies_path_with_file(tmp_path: Path):
 
 
 def test_resolve_cookies_path_with_file_not_found():
-    with pytest.raises(RuntimeError, match="cookies file not found"):
+    with pytest.raises(RuntimeError, match="未找到 cookies 文件"):
         resolve_cookies_path("C:\\nonexistent\\cookies.txt")
 
 
@@ -97,7 +97,7 @@ def test_apply_ytdlp_cookies_sets_cookiefile(tmp_path: Path, monkeypatch, capsys
 
     assert "cookiefile" in opts
     assert Path(str(opts["cookiefile"])).is_file()
-    assert "cookies file" in capsys.readouterr().err
+    assert "已启用 cookies 文件" in capsys.readouterr().err
 
 
 def test_apply_ytdlp_cookies_skipped_when_disabled(opts: dict[str, object] | None = None) -> None:
@@ -114,7 +114,7 @@ def test_build_authenticated_opener_loads_cookie_file(tmp_path: Path, monkeypatc
     opener = build_authenticated_opener(AUTH_SENTINEL)
 
     assert hasattr(opener, "open")
-    assert "cookies loaded" in capsys.readouterr().err
+    assert "HTTP 请求已加载 cookies" in capsys.readouterr().err
 
 
 def test_build_authenticated_opener_skipped_when_disabled() -> None:
