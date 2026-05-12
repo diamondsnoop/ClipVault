@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .asr import resolve_device, transcribe_audio
+from .asr import TranscriptionResult, resolve_device, transcribe_audio
 from .credentials import (
     PLATFORM_CREDENTIAL_KEYS,
     list_credentials,
@@ -39,7 +39,9 @@ from .library import (
 )
 from .auth import clear_cookie_cache
 from .login import login_bilibili
+from .postprocess import simplify_chinese_segments
 from .platforms import download_audio, extract_info
+from .runtime_logs import emit_log
 from .series_rules import resolve_series
 from .subtitles import get_platform_subtitles
 
@@ -57,7 +59,7 @@ def main(argv: list[str] | None = None) -> None:
     try:
         result = run_parsed_args(args)
     except Exception as exc:  # noqa: BLE001 - CLI should report cleanly
-        print(f"[error] {exc}", file=sys.stderr)
+        emit_log("pipeline", str(exc), level="error")
         raise SystemExit(1) from exc
     finally:
         clear_cookie_cache()
@@ -68,7 +70,7 @@ def main(argv: list[str] | None = None) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="clipvault",
-        description="Local-first video transcript vault.",
+        description="本地优先的视频字幕仓库。",
     )
     _add_library_option(parser)
     _add_cookies_option(parser)
@@ -83,7 +85,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _add_library_option(parser: argparse.ArgumentParser, *, default: Any = DEFAULT_LIBRARY) -> None:
-    parser.add_argument("--library", type=Path, default=default, help="Subtitle library root.")
+    parser.add_argument("--library", type=Path, default=default, help="字幕仓库根目录。")
 
 
 def _add_cookies_option(parser: argparse.ArgumentParser, *, default: Any = None) -> None:
@@ -92,109 +94,121 @@ def _add_cookies_option(parser: argparse.ArgumentParser, *, default: Any = None)
         nargs="?",
         const=CLIPVAULT_AUTH_SENTINEL,
         default=default,
-        help="Path to Netscape cookies file, or use stored credentials (--cookies without value).",
+        help="Netscape cookies 文件路径；若不带值则使用已保存凭据（`--cookies`）。",
     )
 
 
 def _add_video_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     parser = subparsers.add_parser(
         "video",
-        help="Process one video URL.",
-        description="Fetch video subtitles, or run ASR when subtitles are unavailable.",
+        help="处理单个视频 URL。",
+        description="优先获取平台字幕；没有可用字幕时回退到本地 ASR。",
     )
-    parser.add_argument("url", help="Video URL (Bilibili, YouTube, etc.).")
+    parser.add_argument("url", help="视频 URL（Bilibili、YouTube 等）。")
     _add_library_option(parser, default=argparse.SUPPRESS)
     _add_cookies_option(parser, default=argparse.SUPPRESS)
-    parser.add_argument("--model", default="small", help="faster-whisper model size/name. Default: small.")
+    parser.add_argument("--model", default="small", help="faster-whisper 模型名称。默认：small。")
     parser.add_argument(
         "--device",
         choices=("auto", "cuda", "cpu"),
         default="auto",
-        help="ASR device. Default: auto, which prefers CUDA when available.",
+        help="ASR 设备。默认：auto；检测到可用 CUDA 时优先使用。",
     )
-    parser.add_argument("--compute-type", default="auto", help="faster-whisper compute type. Default: auto.")
-    parser.add_argument("--force", action="store_true", help="Re-fetch even if transcript exists.")
-    parser.add_argument("--keep-audio", action="store_true", help="Keep downloaded audio after ASR.")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Show yt-dlp logs.")
+    parser.add_argument("--compute-type", default="auto", help="faster-whisper 计算类型。默认：auto。")
+    parser.add_argument(
+        "--simplify-chinese",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="将 ASR 中文输出从繁体转换为简体。默认开启。",
+    )
+    parser.add_argument("--force", action="store_true", help="即使已有完整字幕缓存也重新处理。")
+    parser.add_argument("--keep-audio", action="store_true", help="ASR 后保留下载的音频文件。")
+    parser.add_argument("--verbose", "-v", action="store_true", help="显示 yt-dlp 详细日志。")
     parser.add_argument(
         "--series",
         type=str,
         default=None,
-        help="Optional series name for library grouping.",
+        help="可选系列名，用于仓库归档分组。",
     )
     parser.set_defaults(handler=_run_video_command)
 
 
 def _add_library_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    parser = subparsers.add_parser("library", help="Maintain the local transcript library.")
+    parser = subparsers.add_parser("library", help="维护本地字幕仓库。")
     library_subparsers = parser.add_subparsers(dest="library_command", required=True)
     rebuild_parser = library_subparsers.add_parser(
         "rebuild-index",
-        help="Rebuild creator and series indexes from existing manifests.",
+        help="根据现有 manifest 重建创作者和系列索引。",
     )
     _add_library_option(rebuild_parser, default=argparse.SUPPRESS)
-    rebuild_parser.add_argument("--dry-run", action="store_true", help="Report planned changes without writing indexes.")
+    rebuild_parser.add_argument("--dry-run", action="store_true", help="只报告计划变更，不实际写入索引。")
     rebuild_parser.set_defaults(handler=_run_library_rebuild_index)
 
 
 def _add_creator_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    parser = subparsers.add_parser("creator", help="Manage followed creator sources.")
+    parser = subparsers.add_parser("creator", help="管理已登记的创作者来源。")
     creator_subparsers = parser.add_subparsers(dest="creator_command", required=True)
-    add_parser = creator_subparsers.add_parser("add", help="Record a creator/channel source URL.")
-    add_parser.add_argument("url", help="Creator/channel URL to follow.")
+    add_parser = creator_subparsers.add_parser("add", help="记录一个创作者/频道来源 URL。")
+    add_parser.add_argument("url", help="要追踪的创作者/频道 URL。")
     _add_library_option(add_parser, default=argparse.SUPPRESS)
-    add_parser.add_argument("--name", type=str, default=None, help="Display name for this creator.")
+    add_parser.add_argument("--name", type=str, default=None, help="该创作者的显示名称。")
     add_parser.set_defaults(handler=_run_creator_add)
 
-    list_parser = creator_subparsers.add_parser("list", help="List recorded creator sources.")
+    list_parser = creator_subparsers.add_parser("list", help="列出已记录的创作者来源。")
     _add_library_option(list_parser, default=argparse.SUPPRESS)
     list_parser.set_defaults(handler=_run_creator_list)
 
-    fetch_parser = creator_subparsers.add_parser("fetch", help="Fetch recent video entries for a recorded creator.")
-    fetch_parser.add_argument("selector", help="Creator id, name, or source URL.")
+    fetch_parser = creator_subparsers.add_parser("fetch", help="抓取指定创作者的最近视频条目预览。")
+    fetch_parser.add_argument("selector", help="创作者 id、名称或来源 URL。")
     _add_library_option(fetch_parser, default=argparse.SUPPRESS)
     _add_cookies_option(fetch_parser, default=argparse.SUPPRESS)
-    fetch_parser.add_argument("--limit", type=int, default=20, help="Maximum entries to fetch. Default: 20.")
-    fetch_parser.add_argument("--verbose", "-v", action="store_true", help="Show yt-dlp logs.")
+    fetch_parser.add_argument("--limit", type=int, default=20, help="最多抓取多少条。默认：20。")
+    fetch_parser.add_argument("--verbose", "-v", action="store_true", help="显示 yt-dlp 详细日志。")
     fetch_parser.set_defaults(handler=_run_creator_fetch)
 
-    enqueue_parser = creator_subparsers.add_parser("enqueue", help="Add new creator entries to the local transcript job queue.")
-    enqueue_parser.add_argument("selector", help="Creator id, name, or source URL.")
+    enqueue_parser = creator_subparsers.add_parser("enqueue", help="将新视频加入本地字幕任务队列。")
+    enqueue_parser.add_argument("selector", help="创作者 id、名称或来源 URL。")
     _add_library_option(enqueue_parser, default=argparse.SUPPRESS)
     _add_cookies_option(enqueue_parser, default=argparse.SUPPRESS)
-    enqueue_parser.add_argument("--limit", type=int, default=20, help="Maximum entries to inspect. Default: 20.")
-    enqueue_parser.add_argument("--verbose", "-v", action="store_true", help="Show yt-dlp logs.")
+    enqueue_parser.add_argument("--limit", type=int, default=20, help="最多检查多少条。默认：20。")
+    enqueue_parser.add_argument("--verbose", "-v", action="store_true", help="显示 yt-dlp 详细日志。")
     enqueue_parser.set_defaults(handler=_run_creator_enqueue)
 
 
 def _add_queue_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    parser = subparsers.add_parser("queue", help="Inspect and run transcript jobs.")
+    parser = subparsers.add_parser("queue", help="查看并执行字幕任务队列。")
     queue_subparsers = parser.add_subparsers(dest="queue_command", required=True)
 
-    list_parser = queue_subparsers.add_parser("list", help="List queued transcript jobs.")
+    list_parser = queue_subparsers.add_parser("list", help="列出队列中的字幕任务。")
     _add_library_option(list_parser, default=argparse.SUPPRESS)
-    list_parser.add_argument("--status", type=str, default=None, help="Filter by job status.")
+    list_parser.add_argument("--status", type=str, default=None, help="按任务状态过滤。")
     list_parser.set_defaults(handler=_run_queue_list)
 
-    status_parser = queue_subparsers.add_parser("status", help="Summarize queued transcript jobs.")
+    status_parser = queue_subparsers.add_parser("status", help="汇总队列任务状态。")
     _add_library_option(status_parser, default=argparse.SUPPRESS)
     status_parser.set_defaults(handler=_run_queue_status)
 
-    run_parser = queue_subparsers.add_parser("run", help="Run pending transcript jobs.")
+    run_parser = queue_subparsers.add_parser("run", help="执行待处理的字幕任务。")
     _add_library_option(run_parser, default=argparse.SUPPRESS)
     _add_cookies_option(run_parser, default=argparse.SUPPRESS)
-    run_parser.add_argument("--limit", type=int, default=1, help="Maximum jobs to run. Default: 1.")
-    run_parser.add_argument("--retry-failed", action="store_true", help="Run failed jobs as well as pending jobs.")
-    run_parser.add_argument("--model", default="small", help="faster-whisper model size/name. Default: small.")
+    run_parser.add_argument("--limit", type=int, default=1, help="最多执行多少个任务。默认：1。")
+    run_parser.add_argument("--retry-failed", action="store_true", help="同时重试失败任务。")
+    run_parser.add_argument("--model", default="small", help="faster-whisper 模型名称。默认：small。")
     run_parser.add_argument(
         "--device",
         choices=("auto", "cuda", "cpu"),
         default="auto",
-        help="ASR device. Default: auto, which prefers CUDA when available.",
+        help="ASR 设备。默认：auto；检测到可用 CUDA 时优先使用。",
     )
-    run_parser.add_argument("--compute-type", default="auto", help="faster-whisper compute type. Default: auto.")
-    run_parser.add_argument("--keep-audio", action="store_true", help="Keep downloaded audio after ASR.")
-    run_parser.add_argument("--verbose", "-v", action="store_true", help="Show yt-dlp logs.")
+    run_parser.add_argument("--compute-type", default="auto", help="faster-whisper 计算类型。默认：auto。")
+    run_parser.add_argument(
+        "--simplify-chinese",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="将 ASR 中文输出从繁体转换为简体。默认开启。",
+    )
+    run_parser.add_argument("--keep-audio", action="store_true", help="ASR 后保留下载的音频文件。")
+    run_parser.add_argument("--verbose", "-v", action="store_true", help="显示 yt-dlp 详细日志。")
     run_parser.set_defaults(handler=_run_queue_run)
 
 
@@ -296,46 +310,46 @@ def process_queue_command(argv: list[str] | None = None) -> dict[str, Any]:
 def _add_auth_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     parser = subparsers.add_parser(
         "auth",
-        help="Manage platform credentials.",
+        help="管理平台凭据。",
     )
     auth_subparsers = parser.add_subparsers(dest="auth_command", required=True)
 
     login = auth_subparsers.add_parser(
         "login",
-        help="Log in to a platform (QR code or manual cookie entry).",
+        help="登录平台（二维码或手动 Cookie）。",
     )
     login.add_argument(
         "--platform", "-p",
         nargs="?",
         default="bilibili",
         choices=tuple(PLATFORM_CREDENTIAL_KEYS),
-        help="Target platform. Default: bilibili (QR code login).",
+        help="目标平台。默认：bilibili（二维码登录）。",
     )
     login.add_argument("--mode", choices=("terminal", "web"), default="terminal",
-                       help="QR code display mode (terminal blocks or browser). Default: terminal.")
-    login.add_argument("--sessdata", type=str, default=None, help="Bilibili SESSDATA cookie.")
-    login.add_argument("--bili-jct", type=str, default=None, help="Bilibili bili_jct cookie.")
-    login.add_argument("--session", type=str, default=None, help="Douyin session cookie.")
+                       help="二维码显示方式（终端字符块或浏览器）。默认：terminal。")
+    login.add_argument("--sessdata", type=str, default=None, help="Bilibili 的 SESSDATA Cookie。")
+    login.add_argument("--bili-jct", type=str, default=None, help="Bilibili 的 bili_jct Cookie。")
+    login.add_argument("--session", type=str, default=None, help="Douyin 的 session Cookie。")
     login.set_defaults(handler=_run_auth_login)
 
-    auth_subparsers.add_parser("list", help="Show stored credential keys by platform.").set_defaults(
+    auth_subparsers.add_parser("list", help="按平台显示已保存的凭据字段。").set_defaults(
         handler=_run_auth_list
     )
 
-    logout = auth_subparsers.add_parser("logout", help="Remove credentials for a platform.")
+    logout = auth_subparsers.add_parser("logout", help="移除某个平台的已保存凭据。")
     logout.add_argument(
         "--platform", "-p",
         required=True,
         choices=tuple(PLATFORM_CREDENTIAL_KEYS),
-        help="Platform to remove credentials for.",
+        help="要移除凭据的平台。",
     )
     logout.set_defaults(handler=_run_auth_logout)
 
 
 def _add_ui_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    parser = subparsers.add_parser("ui", help="Start the local web UI.")
-    parser.add_argument("--port", type=int, default=8080, help="Server port. Default: 8080.")
-    parser.add_argument("--no-open", action="store_true", default=False, help="Do not auto-open browser.")
+    parser = subparsers.add_parser("ui", help="启动本地 Web UI。")
+    parser.add_argument("--port", type=int, default=8080, help="服务端口。默认：8080。")
+    parser.add_argument("--no-open", action="store_true", default=False, help="启动后不自动打开浏览器。")
     _add_library_option(parser, default=argparse.SUPPRESS)
     parser.set_defaults(handler=_run_ui)
 
@@ -345,7 +359,7 @@ def _run_ui(args: argparse.Namespace) -> dict[str, Any]:
 
     library = getattr(args, "library", None) or DEFAULT_LIBRARY
     run_server(port=args.port, open_browser=not args.no_open, library=library)
-    return {"status": "ok", "message": "UI server stopped."}
+    return {"status": "ok", "message": "本地界面服务已停止。"}
 
 
 def _run_auth_login(args: argparse.Namespace) -> dict[str, Any]:
@@ -370,8 +384,8 @@ def _run_auth_login(args: argparse.Namespace) -> dict[str, Any]:
     known_keys = PLATFORM_CREDENTIAL_KEYS[args.platform]
     return {
         "status": "error",
-        "message": f"No values provided and QR login is not yet supported for '{args.platform}'. "
-                   f"Usage: clipvault auth login --platform {args.platform} "
+        "message": f"未提供凭据值，且平台 “{args.platform}” 还不支持二维码登录。"
+                   f"可用命令：clipvault auth login --platform {args.platform} "
                    f"{' '.join(f'--{k}' for k in known_keys)}",
     }
 
@@ -383,7 +397,7 @@ def _run_auth_list(args: argparse.Namespace) -> dict[str, Any]:
 def _run_auth_logout(args: argparse.Namespace) -> dict[str, Any]:
     removed = remove_credential(args.platform)
     if not removed:
-        return {"status": "error", "message": f"No credentials found for platform '{args.platform}'."}
+        return {"status": "error", "message": f"未找到平台 “{args.platform}” 的已保存凭据。"}
     clear_cookie_cache()
     return {"status": "ok", "platform": args.platform}
 
@@ -395,6 +409,7 @@ def _run_video_command(args: argparse.Namespace) -> dict[str, Any]:
         model_name=args.model,
         device=args.device,
         compute_type=args.compute_type,
+        simplify_chinese=args.simplify_chinese,
         force=args.force,
         keep_audio=args.keep_audio,
         verbose=args.verbose,
@@ -446,12 +461,12 @@ def _run_queue_status(args: argparse.Namespace) -> dict[str, Any]:
 
 def _run_queue_run(args: argparse.Namespace) -> dict[str, Any]:
     if args.limit < 1:
-        raise ValueError("limit must be at least 1")
+        raise ValueError("limit 至少为 1")
 
     queue = load_job_queue(args.library)
     eligible = {"pending", "failed"} if args.retry_failed else {"pending"}
     jobs = [job for job in queue.get("jobs", []) if job.get("status") in eligible][: args.limit]
-    print(f"[queue] running: {len(jobs)}", file=sys.stderr)
+    emit_log("queue", f"准备执行 {len(jobs)} 个任务")
 
     succeeded = 0
     failed = 0
@@ -460,10 +475,10 @@ def _run_queue_run(args: argparse.Namespace) -> dict[str, Any]:
         source_url = str(job.get("source_url") or "").strip()
         if not source_url:
             job["status"] = "failed"
-            job["last_error"] = "missing source_url"
+            job["last_error"] = "缺少 source_url"
             failed += 1
             continue
-        print(f"[queue] job start: {job.get('id')} {source_url}", file=sys.stderr)
+        emit_log("queue", f"开始执行任务：{job.get('id')} {source_url}")
         job["status"] = "running"
         job["last_error"] = None
         write_job_queue(args.library, queue)
@@ -474,6 +489,7 @@ def _run_queue_run(args: argparse.Namespace) -> dict[str, Any]:
                 model_name=args.model,
                 device=args.device,
                 compute_type=args.compute_type,
+                simplify_chinese=args.simplify_chinese,
                 force=False,
                 keep_audio=args.keep_audio,
                 verbose=args.verbose,
@@ -484,7 +500,7 @@ def _run_queue_run(args: argparse.Namespace) -> dict[str, Any]:
             job["status"] = "failed"
             job["last_error"] = str(exc)
             failed += 1
-            print(f"[queue] job failed: {job.get('id')} {exc}", file=sys.stderr)
+            emit_log("queue", f"任务失败：{job.get('id')}（{exc}）", level="error")
         else:
             job["status"] = "done"
             job["result"] = {
@@ -494,7 +510,7 @@ def _run_queue_run(args: argparse.Namespace) -> dict[str, Any]:
             }
             succeeded += 1
             results.append({"job_id": job.get("id"), "result": result})
-            print(f"[queue] job done: {job.get('id')}", file=sys.stderr)
+            emit_log("queue", f"任务完成：{job.get('id')}", level="success")
         finally:
             write_job_queue(args.library, queue)
 
@@ -530,24 +546,25 @@ def process_video(
     verbose: bool,
     series: str | None = None,
     cookies: Path | str | None = None,
+    simplify_chinese: bool = True,
 ) -> dict[str, Any]:
     if not shutil.which("ffmpeg"):
-        raise RuntimeError("ffmpeg is not available in PATH.")
+        raise RuntimeError("系统 PATH 中未找到 ffmpeg，请先安装并确保命令可用。")
 
-    print(f"[pipeline] processing {url}", file=sys.stderr)
+    emit_log("pipeline", f"开始处理：{url}")
     info = extract_info(url, verbose=verbose, cookies=cookies)
     title = first_text(info, "title", default="untitled")
     uploader = first_text(info, "uploader", "channel", "creator", default="unknown-uploader")
     video_id = first_text(info, "id", "display_id", default="unknown-id")
     platform = guess_platform(url)
-    print(f"[platform] {platform}", file=sys.stderr)
+    emit_log("platform", f"已识别平台：{platform}")
 
     # Resolve series: explicit --series takes priority, otherwise auto-rules
     series, series_source = resolve_series(
         library, platform=platform, uploader=uploader, title=title, explicit_series=series,
     )
     if series:
-        print(f"[library] series: {series}", file=sys.stderr)
+        emit_log("library", f"系列归档：{series}")
 
     # Check cache (handles both new platform-aware and legacy paths)
     video_dir = resolve_video_directory(
@@ -555,13 +572,14 @@ def process_video(
     )
     if is_completed(video_dir) and not force:
         md_path = video_dir / "transcript.md"
-        print(f"[cache] hit: {video_dir}", file=sys.stderr)
+        emit_log("cache", f"命中缓存：{video_dir}", level="success")
         # Update indexes so pre-index caches get indexed
+        cached_manifest: dict[str, Any] = {}
         try:
             cached_manifest = json.loads((video_dir / "manifest.json").read_text(encoding="utf-8"))
             update_library_indexes(video_dir, cached_manifest, library)
         except Exception as exc:
-            print(f"[index] failed on cache hit ({video_dir}): {exc}", file=sys.stderr)
+            emit_log("index", f"缓存命中后的索引更新失败：{video_dir}（{exc}）", level="warning")
         source = cached_manifest.get("subtitle_source")
         segments = _count_srt_segments(video_dir / "transcript.srt")
         return {
@@ -574,6 +592,8 @@ def process_video(
             "series_source": series_source,
             "source": source,
             "segments": segments,
+            "asr_model": cached_manifest.get("asr_model"),
+            "asr_device": cached_manifest.get("asr_device"),
             "markdown": str(md_path) if md_path.exists() else None,
             "folder": str(video_dir),
         }
@@ -587,17 +607,30 @@ def process_video(
 
     segments, source = get_platform_subtitles(info, platform=platform, cookies=cookies)
     if not segments:
-        print("[pipeline] no subtitles found, falling back to ASR", file=sys.stderr)
+        emit_log("subtitle", "未找到可用平台字幕，回退到本地 ASR", level="warning")
         audio_path = download_audio(url, video_dir, verbose=verbose, cookies=cookies)
-        segments = transcribe_audio(audio_path, model_name=model_name, device=device, compute_type=compute_type)
+        transcription = transcribe_audio(audio_path, model_name=model_name, device=device, compute_type=compute_type)
+        if isinstance(transcription, TranscriptionResult):
+            segments = transcription.segments
+            actual_asr_device = transcription.device
+        else:
+            segments = transcription
+            actual_asr_device = resolve_device(device)
         source = "asr:faster-whisper"
+        if simplify_chinese:
+            try:
+                segments = simplify_chinese_segments(segments)
+            except RuntimeError as exc:
+                emit_log("asr", f"{exc} 已跳过中文转简。", level="warning")
+            else:
+                emit_log("asr", "已将中文 ASR 结果转换为简体中文", level="success")
         if not keep_audio:
             try:
                 audio_path.unlink()
             except OSError:
                 pass
     else:
-        print(f"[pipeline] using {source}", file=sys.stderr)
+        emit_log("subtitle", f"将使用平台字幕：{source}", level="success")
 
     write_outputs(
         video_dir=video_dir,
@@ -609,9 +642,9 @@ def process_video(
         segments=segments,
     )
 
-    print(f"[export] srt: {video_dir / 'transcript.srt'}", file=sys.stderr)
-    print(f"[export] txt: {video_dir / 'transcript.txt'}", file=sys.stderr)
-    print(f"[export] md:  {video_dir / 'transcript.md'}", file=sys.stderr)
+    emit_log("export", f"已写出 SRT：{video_dir / 'transcript.srt'}", level="success")
+    emit_log("export", f"已写出 TXT：{video_dir / 'transcript.txt'}", level="success")
+    emit_log("export", f"已写出 Markdown：{video_dir / 'transcript.md'}", level="success")
 
     manifest_updates: dict[str, Any] = {
         "subtitle_source": source,
@@ -619,15 +652,19 @@ def process_video(
     }
     if source.startswith("asr:"):
         manifest_updates["asr_model"] = model_name
-        manifest_updates["asr_device"] = resolve_device(device)
-    update_manifest(video_dir / "manifest.json", **manifest_updates)
+        manifest_updates["asr_device"] = actual_asr_device
+    final_manifest: dict[str, Any] | None = None
+    try:
+        final_manifest = update_manifest(video_dir / "manifest.json", fallback=manifest, **manifest_updates)
+    except RuntimeError as exc:
+        emit_log("library", f"更新 manifest 失败：{exc}", level="error")
 
     # Update indexes after manifest is final
-    try:
-        final_manifest = json.loads((video_dir / "manifest.json").read_text(encoding="utf-8"))
-        update_library_indexes(video_dir, final_manifest, library)
-    except Exception as exc:
-        print(f"[index] failed ({video_dir}): {exc}", file=sys.stderr)
+    if final_manifest is not None:
+        try:
+            update_library_indexes(video_dir, final_manifest, library)
+        except Exception as exc:
+            emit_log("index", f"处理完成后的索引更新失败：{video_dir}（{exc}）", level="warning")
 
     return {
         "status": "ok",
@@ -639,6 +676,8 @@ def process_video(
         "series": series,
         "series_source": series_source,
         "segments": len(segments),
+        "asr_model": manifest_updates.get("asr_model"),
+        "asr_device": manifest_updates.get("asr_device"),
         "markdown": str(video_dir / "transcript.md"),
         "folder": str(video_dir),
     }

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import shutil
+import uuid
 from pathlib import Path
 
+from clipvault.asr import TranscriptionResult
 from clipvault.subtitles import SubtitleSegment
 
 AUTH_SENTINEL = "__clipvault_auth__"
@@ -243,6 +246,171 @@ def test_process_video_passes_cookies_to_fetchers(tmp_path: Path, monkeypatch):
 
     assert result["status"] == "ok"
     assert seen == {"metadata": True, "subtitles": True}
+
+
+def test_process_video_manifest_update_failure_does_not_abort(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        "clipvault.cli.extract_info",
+        lambda url, *, verbose, cookies=None: {"title": "T", "uploader": "U", "id": "vid-manifest"},
+    )
+    monkeypatch.setattr(
+        "clipvault.cli.get_platform_subtitles",
+        lambda info, platform, cookies=None: ([SubtitleSegment(0.0, 1.0, "h")], "subtitle:en:json3"),
+    )
+    monkeypatch.setattr("clipvault.cli.update_manifest", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    seen = {"index_called": False}
+
+    def fake_update_library_indexes(video_dir, manifest, library):
+        seen["index_called"] = True
+
+    monkeypatch.setattr("clipvault.cli.update_library_indexes", fake_update_library_indexes)
+
+    from clipvault.cli import process_video
+
+    result = process_video(
+        url="https://youtube.com/watch?v=vid-manifest",
+        library=tmp_path,
+        model_name="tiny",
+        device="cpu",
+        compute_type="int8",
+        force=True,
+        keep_audio=False,
+        verbose=False,
+    )
+
+    assert result["status"] == "ok"
+    assert seen["index_called"] is False
+
+
+def test_process_video_asr_simplifies_chinese_output(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        "clipvault.cli.extract_info",
+        lambda url, *, verbose, cookies=None: {"title": "T", "uploader": "U", "id": "vid-asr"},
+    )
+    monkeypatch.setattr(
+        "clipvault.cli.get_platform_subtitles",
+        lambda info, platform, cookies=None: ([], "none"),
+    )
+
+    audio_path = tmp_path / "audio.m4a"
+    audio_path.write_text("x", encoding="utf-8")
+    monkeypatch.setattr("clipvault.cli.download_audio", lambda *args, **kwargs: audio_path)
+    monkeypatch.setattr(
+        "clipvault.cli.transcribe_audio",
+        lambda *args, **kwargs: [SubtitleSegment(0.0, 1.0, "學習 繁體 中文")],
+    )
+    monkeypatch.setattr(
+        "clipvault.cli.simplify_chinese_segments",
+        lambda segments: [SubtitleSegment(0.0, 1.0, "学习 简体 中文")],
+    )
+
+    from clipvault.cli import process_video
+
+    result = process_video(
+        url="https://www.bilibili.com/video/BV1asr",
+        library=tmp_path,
+        model_name="tiny",
+        device="cpu",
+        compute_type="int8",
+        force=True,
+        keep_audio=False,
+        verbose=False,
+    )
+
+    transcript_txt = Path(result["folder"]) / "transcript.txt"
+    assert "学习 简体 中文" in transcript_txt.read_text(encoding="utf-8")
+    assert result["source"] == "asr:faster-whisper"
+
+
+def test_process_video_asr_simplify_failure_is_non_blocking(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        "clipvault.cli.extract_info",
+        lambda url, *, verbose, cookies=None: {"title": "T", "uploader": "U", "id": "vid-asr-warn"},
+    )
+    monkeypatch.setattr(
+        "clipvault.cli.get_platform_subtitles",
+        lambda info, platform, cookies=None: ([], "none"),
+    )
+
+    audio_path = tmp_path / "audio.m4a"
+    audio_path.write_text("x", encoding="utf-8")
+    monkeypatch.setattr("clipvault.cli.download_audio", lambda *args, **kwargs: audio_path)
+    monkeypatch.setattr(
+        "clipvault.cli.transcribe_audio",
+        lambda *args, **kwargs: [SubtitleSegment(0.0, 1.0, "學習 繁體 中文")],
+    )
+    monkeypatch.setattr(
+        "clipvault.cli.simplify_chinese_segments",
+        lambda segments: (_ for _ in ()).throw(RuntimeError("缺少 opencc")),
+    )
+
+    from clipvault.cli import process_video
+
+    result = process_video(
+        url="https://www.bilibili.com/video/BV1warn",
+        library=tmp_path,
+        model_name="tiny",
+        device="cpu",
+        compute_type="int8",
+        force=True,
+        keep_audio=False,
+        verbose=False,
+    )
+
+    transcript_txt = Path(result["folder"]) / "transcript.txt"
+    assert "學習 繁體 中文" in transcript_txt.read_text(encoding="utf-8")
+    assert result["status"] == "ok"
+
+
+def test_process_video_records_actual_asr_device(monkeypatch):
+    tmp_path = Path.cwd() / ".tmp" / "test-cli" / f"case-{uuid.uuid4().hex}"
+    tmp_path.mkdir(parents=True, exist_ok=False)
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        "clipvault.cli.extract_info",
+        lambda url, *, verbose, cookies=None: {"title": "T", "uploader": "U", "id": "vid-asr-device"},
+    )
+    monkeypatch.setattr(
+        "clipvault.cli.get_platform_subtitles",
+        lambda info, platform, cookies=None: ([], "none"),
+    )
+
+    audio_path = tmp_path / "audio.m4a"
+    audio_path.write_text("x", encoding="utf-8")
+    monkeypatch.setattr("clipvault.cli.download_audio", lambda *args, **kwargs: audio_path)
+    monkeypatch.setattr(
+        "clipvault.cli.transcribe_audio",
+        lambda *args, **kwargs: TranscriptionResult(
+            segments=[SubtitleSegment(0.0, 1.0, "cpu fallback")],
+            device="cpu",
+            compute_type="int8",
+        ),
+    )
+
+    from clipvault.cli import process_video
+
+    try:
+        result = process_video(
+            url="https://www.bilibili.com/video/BV1cpu",
+            library=tmp_path,
+            model_name="tiny",
+            device="auto",
+            compute_type="auto",
+            force=True,
+            keep_audio=False,
+            verbose=False,
+        )
+
+        manifest_path = Path(result["folder"]) / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        assert result["asr_device"] == "cpu"
+        assert manifest["asr_device"] == "cpu"
+    finally:
+        shutil.rmtree(tmp_path, ignore_errors=True)
 
 
 def test_process_video_stripped_series(tmp_path: Path, monkeypatch):
