@@ -1,5 +1,10 @@
 # Phase 6: Desktop UI — Implementation Spec
 
+> Status: completed
+> Last updated: 2026-05-12
+> Source of truth: Phase 6 桌面 Web UI 的历史实现规格。
+> Superseded by: Phase 7 Web UI 体验改造和当前 `clipvault/ui/static/` 实现。
+
 ## Overview
 
 Build a local web-based GUI for ClipVault. The UI runs in the browser, powered by a lightweight Python web server. The frontend talks to local API endpoints; the server reuses existing `clipvault` behavior instead of reimplementing transcript logic. No frontend build step.

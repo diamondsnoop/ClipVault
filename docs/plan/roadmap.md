@@ -1,5 +1,9 @@
 # ClipVault 路线图
 
+> Status: active
+> Last updated: 2026-05-12
+> Source of truth: 项目整体阶段路线和当前开发边界。
+
 ## 产品方向
 
 ClipVault 是一个本地优先的视频字幕库。它的核心价值是可靠获取、保存和长期维护原始视频内容的字幕。

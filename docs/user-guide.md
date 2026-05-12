@@ -1,5 +1,9 @@
 # ClipVault 用户手册
 
+> Status: active
+> Last updated: 2026-05-12
+> Source of truth: 普通用户安装、配置和使用 ClipVault 的说明。
+
 ## 1. ClipVault 是什么
 
 ClipVault 是一个本地优先的视频字幕库。它接收视频 URL，优先保存平台已经提供的字幕；如果平台没有字幕，就下载音频并运行本地 ASR，然后把结果稳定保存到本地仓库。

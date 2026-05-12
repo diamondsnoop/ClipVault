@@ -1,5 +1,10 @@
 # Phase 7：产品体验优化与文档建设
 
+> Status: completed
+> Last updated: 2026-05-12
+> Source of truth: Phase 7 质量修复、日志体验和文档建设的阶段计划。
+> Superseded by: `docs/plan/phase8-source-collection-workflow.md` for 合集/来源后续开发。
+
 ## 背景
 
 Phase 6 完成了桌面 Web UI，用户开始实机使用。在真实 B 站视频（一条闲木鱼《大明王朝1566》系列）的处理过程中，发现了三类问题：

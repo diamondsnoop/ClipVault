@@ -1,5 +1,10 @@
 # ClipVault MVP 开发总结
 
+> Status: historical
+> Last updated: 2026-05-12
+> Source of truth: MVP 阶段完成情况的历史总结。
+> Superseded by: `docs/plan/roadmap.md` for 当前路线判断。
+
 ## 结论
 
 ClipVault MVP 已经达到当前计划中的功能完整状态。
