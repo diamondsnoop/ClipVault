@@ -13,12 +13,15 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from clipvault.runtime_logs import emit_log
+
 DEFAULT_PORT = 8080
 DEFAULT_HOST = "127.0.0.1"
 
 # Lazy imports for backend functions
 _creators: Any = None
 _library: Any = None
+JOB_ERROR_TAIL_LINES = 20
 
 
 def _lazy_imports() -> None:
@@ -35,9 +38,9 @@ def _lazy_imports() -> None:
 class Job:
     __slots__ = ("job_id", "type", "status", "command", "events",
                  "result", "error", "returncode", "process",
-                 "created_at", "started_at", "finished_at", "_lock", "_cond")
+                 "created_at", "started_at", "finished_at", "log_dir", "preferred_log_root", "error_context", "_lock", "_cond")
 
-    def __init__(self, job_id: str, type: str, command: list[str]) -> None:
+    def __init__(self, job_id: str, type: str, command: list[str], *, log_root: Path | None = None) -> None:
         self.job_id = job_id
         self.type = type
         self.status = "queued"
@@ -50,8 +53,21 @@ class Job:
         self.created_at = time.time()
         self.started_at: float | None = None
         self.finished_at: float | None = None
+        self.log_dir: Path | None = None
+        self.preferred_log_root: Path | None = Path(log_root) if log_root is not None else None
+        self.error_context: list[str] = []
         self._lock = threading.Lock()
         self._cond = threading.Condition(self._lock)
+
+    def log_files(self) -> dict[str, str] | None:
+        if self.log_dir is None:
+            return None
+        return {
+            "job": str(self.log_dir / "job.json"),
+            "stderr": str(self.log_dir / "stderr.log"),
+            "stdout": str(self.log_dir / "stdout.txt"),
+            "result": str(self.log_dir / "result.json"),
+        }
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -64,7 +80,10 @@ class Job:
             "finished_at": self.finished_at,
             "result": self.result,
             "error": self.error,
+            "error_context": self.error_context[-JOB_ERROR_TAIL_LINES:],
             "returncode": self.returncode,
+            "log_dir": str(self.log_dir) if self.log_dir else None,
+            "log_files": self.log_files(),
             "events": self.events[-500:],  # last 500 lines
         }
 
@@ -80,13 +99,21 @@ class JobManager:
             if self._job is not None and self._job.status == "running":
                 return False
             self._job = job
+        try:
+            _prepare_job_logging(job)
+        except OSError as exc:
+            _append_job_event(job, f"[警告][界面] 创建任务日志目录失败：{exc}")
         threading.Thread(target=self._run, args=(job,), daemon=True).start()
         return True
 
     def _run(self, job: Job) -> None:
         job.status = "running"
         job.started_at = time.time()
+        stderr_log = None
         try:
+            _prepare_job_logging(job)
+            _write_job_snapshot(job)
+
             proc = subprocess.Popen(
                 job.command,
                 stdout=subprocess.PIPE,
@@ -95,14 +122,17 @@ class JobManager:
                 encoding="utf-8",
             )
             job.process = proc
+            if job.log_dir is not None:
+                stderr_log = (job.log_dir / "stderr.log").open("w", encoding="utf-8")
 
             # Read stderr line by line in real time
             def read_stderr() -> None:
                 assert proc.stderr is not None
                 for line in iter(proc.stderr.readline, ""):
-                    with job._cond:
-                        job.events.append(line.rstrip("\n"))
-                        job._cond.notify_all()
+                    if stderr_log is not None:
+                        stderr_log.write(line)
+                        stderr_log.flush()
+                    _append_job_event(job, line)
 
             stderr_thread = threading.Thread(target=read_stderr, daemon=True)
             stderr_thread.start()
@@ -110,24 +140,42 @@ class JobManager:
             # Read stdout (final JSON result) while stderr is streamed above.
             assert proc.stdout is not None
             stdout = proc.stdout.read()
+            if job.log_dir is not None:
+                (job.log_dir / "stdout.txt").write_text(stdout, encoding="utf-8")
             proc.wait()
             stderr_thread.join()
 
             job.returncode = proc.returncode
 
             if proc.returncode == 0 and stdout:
-                job.result = json.loads(stdout)
-                job.status = "succeeded"
+                try:
+                    job.result = json.loads(stdout)
+                except json.JSONDecodeError as exc:
+                    job.error = f"任务已结束，但返回结果不是有效 JSON：{exc}"
+                    job.error_context = _stderr_tail(job.events)
+                    job.status = "failed"
+                else:
+                    if job.log_dir is not None:
+                        (job.log_dir / "result.json").write_text(
+                            json.dumps(job.result, ensure_ascii=False, indent=2),
+                            encoding="utf-8",
+                        )
+                    job.status = "succeeded"
             elif proc.returncode == 0:
                 job.status = "succeeded"
             else:
-                job.error = stdout.strip() or f"Process exited with code {proc.returncode}"
+                job.error_context = _stderr_tail(job.events)
+                job.error = _summarize_job_failure(stdout, job.error_context, proc.returncode)
                 job.status = "failed"
         except Exception as exc:
             job.error = str(exc)
+            job.error_context = _stderr_tail(job.events)
             job.status = "failed"
         finally:
+            if stderr_log is not None:
+                stderr_log.close()
             job.finished_at = time.time()
+            _write_job_snapshot(job)
             with job._cond:
                 job._cond.notify_all()
 
@@ -153,6 +201,14 @@ def settings_path() -> Path:
     return base / "ClipVault" / "settings.json"
 
 
+def jobs_root_path() -> Path:
+    return settings_path().parent / "jobs"
+
+
+def workspace_jobs_root_path() -> Path:
+    return Path.cwd() / ".tmp" / "jobs"
+
+
 _settings_cache: dict[str, Any] | None = None
 
 
@@ -162,6 +218,7 @@ def _default_settings(fallback: Path) -> dict[str, Any]:
         "model": "small",
         "device": "auto",
         "compute_type": "auto",
+        "simplify_chinese": True,
         "cookies": None,
     }
 
@@ -224,7 +281,7 @@ def build_queue_run_command(library_root: Path, settings: dict[str, Any], data: 
     raw_limit = data.get("limit", 1)
     limit = int(raw_limit if raw_limit is not None else 1)
     if limit < 1:
-        raise ValueError("limit must be at least 1")
+        raise ValueError("limit 至少为 1")
 
     cmd = [
         sys.executable, "-m", "clipvault", "queue", "run",
@@ -240,9 +297,115 @@ def build_queue_run_command(library_root: Path, settings: dict[str, Any], data: 
         cmd.append("--keep-audio")
     if data.get("verbose"):
         cmd.append("--verbose")
+    simplify_chinese = _resolve_bool_option(data, settings, "simplify_chinese", True)
+    if not simplify_chinese:
+        cmd.append("--no-simplify-chinese")
     if settings.get("cookies"):
         cmd += ["--cookies", settings["cookies"]]
     return cmd
+
+
+def _resolve_bool_option(data: dict[str, Any], settings: dict[str, Any], key: str, default: bool) -> bool:
+    if key in data:
+        return bool(data[key])
+    return bool(settings.get(key, default))
+
+
+def _append_job_event(job: Job, line: str) -> None:
+    with job._cond:
+        job.events.append(line.rstrip("\n"))
+        job._cond.notify_all()
+
+
+def _stderr_tail(events: list[str], *, limit: int = JOB_ERROR_TAIL_LINES) -> list[str]:
+    return [line for line in events if str(line).strip()][-limit:]
+
+
+def _summarize_job_failure(stdout: str, error_context: list[str], returncode: int | None) -> str:
+    preferred = next((line for line in reversed(error_context) if "[错误]" in line), None)
+    if preferred is None and error_context:
+        preferred = error_context[-1]
+    if preferred:
+        return f"{preferred}（退出码 {returncode}）" if returncode is not None else preferred
+
+    stdout_lines = [line.strip() for line in stdout.splitlines() if line.strip()]
+    if stdout_lines:
+        summary = stdout_lines[-1]
+        return f"{summary}（退出码 {returncode}）" if returncode is not None else summary
+
+    if returncode is None:
+        return "任务失败。"
+    return f"任务失败，退出码 {returncode}。"
+
+
+def _job_directory_name(job: Job) -> str:
+    timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(job.created_at))
+    millis = int((job.created_at - int(job.created_at)) * 1000)
+    return f"{timestamp}-{millis:03d}-{job.type}-{job.job_id}"
+
+
+def _job_log_root_candidates(job: Job) -> list[Path]:
+    candidates = [jobs_root_path()]
+    if job.preferred_log_root is not None:
+        candidates.append(job.preferred_log_root)
+    candidates.append(workspace_jobs_root_path())
+
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for path in candidates:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(path)
+    return unique
+
+
+def _create_job_log_dir(job: Job) -> Path:
+    last_error: OSError | None = None
+    for root in _job_log_root_candidates(job):
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            path = root / _job_directory_name(job)
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+        except OSError as exc:
+            last_error = exc
+            continue
+    if last_error is not None:
+        raise last_error
+    raise OSError("无法创建任务日志目录。")
+
+
+def _prepare_job_logging(job: Job) -> None:
+    if job.log_dir is None:
+        job.log_dir = _create_job_log_dir(job)
+        default_root = jobs_root_path()
+        if job.log_dir.parent != default_root:
+            _append_job_event(job, f"[警告][界面] 默认日志目录不可用，已回退到：{job.log_dir.parent}")
+    _write_job_snapshot(job)
+
+
+def _write_job_snapshot(job: Job) -> None:
+    if job.log_dir is None:
+        return
+    snapshot_path = job.log_dir / "job.json"
+    snapshot_path.write_text(
+        json.dumps(job.to_dict(), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _job_done_payload(job: Job) -> dict[str, Any]:
+    return {
+        "job_id": job.job_id,
+        "status": job.status,
+        "returncode": job.returncode,
+        "error": job.error,
+        "error_context": job.error_context[-JOB_ERROR_TAIL_LINES:],
+        "log_dir": str(job.log_dir) if job.log_dir else None,
+        "log_files": job.log_files(),
+    }
 
 
 # ── Library Tree & Transcript ──────────────────────────────────────
@@ -376,25 +539,25 @@ class ClipVaultHandler(http.server.BaseHTTPRequestHandler):
     library_root: Path = Path.cwd() / "library"
 
     def log_message(self, format: str, *args: Any) -> None:
-        print(f"[ui] {self.address_string()} - {format % args}", file=sys.stderr)
+        emit_log("ui", f"{self.address_string()} - {format % args}")
 
     def _check_security(self) -> bool:
         host = self.headers.get("Host", "")
         if host and host.split(":")[0] not in ("127.0.0.1", "localhost"):
-            self.send_error(403, "Forbidden: invalid Host")
+            self.send_error(403, "拒绝访问：Host 无效")
             return False
         origin = self.headers.get("Origin", "")
         if origin:
             parsed = urlparse(origin)
             if parsed.hostname not in ("127.0.0.1", "localhost"):
-                self.send_error(403, "Forbidden: invalid Origin")
+                self.send_error(403, "拒绝访问：Origin 无效")
                 return False
         return True
 
     def _check_token(self) -> bool:
         token = self.headers.get("X-ClipVault-Token", "")
         if token != self.server_token:
-            self.send_error(401, "Unauthorized: invalid or missing token")
+            self.send_error(401, "未授权：token 缺失或无效")
             return False
         return True
 
@@ -420,11 +583,11 @@ class ClipVaultHandler(http.server.BaseHTTPRequestHandler):
         try:
             file_path.relative_to(static_dir.resolve())
         except ValueError:
-            self.send_error(403, "Forbidden")
+            self.send_error(403, "拒绝访问")
             return
 
         if not file_path.is_file():
-            self.send_error(404, "Not Found")
+            self.send_error(404, "未找到资源")
             return
 
         content = file_path.read_bytes()
@@ -485,11 +648,11 @@ class ClipVaultHandler(http.server.BaseHTTPRequestHandler):
                 return
             rel_path = (params.get("path") or [""])[0]
             if not rel_path:
-                self._send_json({"status": "error", "message": "Missing path parameter."}, 400)
+                self._send_json({"status": "error", "message": "缺少 path 参数。"}, 400)
                 return
             target = str(self._library_root() / rel_path)
             if not self._validate_path_in_root(target):
-                self._send_json({"status": "error", "message": "Path not in library root."}, 403)
+                self._send_json({"status": "error", "message": "目标路径不在字幕库根目录内。"}, 403)
                 return
             result = _read_transcript(Path(target))
             self._send_json(result)
@@ -498,15 +661,15 @@ class ClipVaultHandler(http.server.BaseHTTPRequestHandler):
                 return
             rel_path = (params.get("path") or [""])[0]
             if not rel_path:
-                self._send_json({"status": "error", "message": "Missing path parameter."}, 400)
+                self._send_json({"status": "error", "message": "缺少 path 参数。"}, 400)
                 return
             target = str(self._library_root() / rel_path)
             if not self._validate_path_in_root(target):
-                self._send_json({"status": "error", "message": "Path not in library root."}, 403)
+                self._send_json({"status": "error", "message": "目标路径不在字幕库根目录内。"}, 403)
                 return
             manifest_path = Path(target) / "manifest.json"
             if not manifest_path.is_file():
-                self._send_json({"status": "error", "message": "No manifest.json found."}, 404)
+                self._send_json({"status": "error", "message": "没有找到 manifest.json。"}, 404)
                 return
             try:
                 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -532,13 +695,13 @@ class ClipVaultHandler(http.server.BaseHTTPRequestHandler):
                 "jobs": jobs,
             })
         else:
-            self.send_error(404, "Not Found")
+            self.send_error(404, "未找到 API")
 
     def _handle_api_post(self, path: str, data: dict[str, Any]) -> None:
         if path == "/api/settings":
             current = load_settings_with_default(self.library_root)
             updated = dict(current)
-            for key in ("library", "model", "device", "compute_type", "cookies"):
+            for key in ("library", "model", "device", "compute_type", "simplify_chinese", "cookies"):
                 if key in data:
                     updated[key] = data[key]
             if updated.get("library"):
@@ -556,7 +719,7 @@ class ClipVaultHandler(http.server.BaseHTTPRequestHandler):
             library_root = self._library_root()
             full_path = str((library_root / target).resolve()) if not os.path.isabs(target) else target
             if not self._validate_path_in_root(full_path):
-                self._send_json({"status": "error", "message": "Path not in library root."}, 403)
+                self._send_json({"status": "error", "message": "目标路径不在字幕库根目录内。"}, 403)
                 return
             try:
                 os.startfile(full_path)
@@ -575,7 +738,7 @@ class ClipVaultHandler(http.server.BaseHTTPRequestHandler):
             _lazy_imports()
             source_url = data.get("source_url", "").strip()
             if not source_url:
-                self._send_json({"status": "error", "message": "Missing source_url."}, 400)
+                self._send_json({"status": "error", "message": "缺少 source_url。"}, 400)
                 return
             try:
                 result = _creators.add_creator_source(self._library_root(), source_url=source_url, name=data.get("name"))
@@ -586,7 +749,7 @@ class ClipVaultHandler(http.server.BaseHTTPRequestHandler):
             _lazy_imports()
             selector = data.get("selector", "").strip()
             if not selector:
-                self._send_json({"status": "error", "message": "Missing selector."}, 400)
+                self._send_json({"status": "error", "message": "缺少 selector。"}, 400)
                 return
             settings = load_settings_with_default(self.library_root)
             cookies = settings.get("cookies")
@@ -605,7 +768,7 @@ class ClipVaultHandler(http.server.BaseHTTPRequestHandler):
             _lazy_imports()
             selector = data.get("selector", "").strip()
             if not selector:
-                self._send_json({"status": "error", "message": "Missing selector."}, 400)
+                self._send_json({"status": "error", "message": "缺少 selector。"}, 400)
                 return
             settings = load_settings_with_default(self.library_root)
             cookies = settings.get("cookies")
@@ -624,7 +787,7 @@ class ClipVaultHandler(http.server.BaseHTTPRequestHandler):
             _lazy_imports()
             job_id = data.get("job_id", "")
             if not job_id:
-                self._send_json({"status": "error", "message": "Missing job_id."}, 400)
+                self._send_json({"status": "error", "message": "缺少 job_id。"}, 400)
                 return
             try:
                 queue = _creators.load_job_queue(self._library_root())
@@ -636,14 +799,14 @@ class ClipVaultHandler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/queue/run":
             self._start_queue_job(data)
         else:
-            self.send_error(404, "Not Found")
+            self.send_error(404, "未找到 API")
 
     # ── Video Job ────────────────────────────────────────────────────
 
     def _start_video_job(self, data: dict[str, Any]) -> None:
         url = data.get("url", "").strip()
         if not url:
-            self._send_json({"status": "error", "message": "Missing 'url' field."}, 400)
+            self._send_json({"status": "error", "message": "缺少 url 字段。"}, 400)
             return
 
         settings = load_settings_with_default(self.library_root)
@@ -659,18 +822,21 @@ class ClipVaultHandler(http.server.BaseHTTPRequestHandler):
         device = data.get("device") or settings.get("device", "auto")
         model = data.get("model") or settings.get("model", "small")
         compute_type = data.get("compute_type") or settings.get("compute_type", "auto")
+        simplify_chinese = _resolve_bool_option(data, settings, "simplify_chinese", True)
         cmd += ["--device", device, "--model", model, "--compute-type", compute_type]
+        if not simplify_chinese:
+            cmd.append("--no-simplify-chinese")
         if settings.get("cookies"):
             cmd += ["--cookies", settings["cookies"]]
         if data.get("keep_audio"):
             cmd.append("--keep-audio")
 
-        job = Job(secrets.token_hex(8), "video", cmd)
+        job = Job(secrets.token_hex(8), "video", cmd, log_root=library_root / "_job_logs")
         if not _JOB_MANAGER.start(job):
-            self._send_json({"status": "error", "message": "Another job is already running."}, 409)
+            self._send_json({"status": "error", "message": "当前已有任务在运行，请稍后再试。"}, 409)
             return
 
-        self._send_json({"status": "ok", "job_id": job.job_id})
+        self._send_json({"status": "ok", "job_id": job.job_id, "log_dir": str(job.log_dir) if job.log_dir else None})
 
     def _start_queue_job(self, data: dict[str, Any]) -> None:
         settings = load_settings_with_default(self.library_root)
@@ -681,21 +847,21 @@ class ClipVaultHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({"status": "error", "message": str(exc)}, 400)
             return
 
-        job = Job(secrets.token_hex(8), "queue", cmd)
+        job = Job(secrets.token_hex(8), "queue", cmd, log_root=library_root / "_job_logs")
         if not _JOB_MANAGER.start(job):
-            self._send_json({"status": "error", "message": "Another job is already running."}, 409)
+            self._send_json({"status": "error", "message": "当前已有任务在运行，请稍后再试。"}, 409)
             return
 
-        self._send_json({"status": "ok", "job_id": job.job_id})
+        self._send_json({"status": "ok", "job_id": job.job_id, "log_dir": str(job.log_dir) if job.log_dir else None})
 
     def _stop_job(self) -> None:
         job = _JOB_MANAGER.get_job()
         if job is None or job.status != "running":
-            self._send_json({"status": "error", "message": "No running job."}, 400)
+            self._send_json({"status": "error", "message": "当前没有正在运行的任务。"}, 400)
             return
         if job.process is not None:
             job.process.terminate()
-        self._send_json({"status": "ok", "message": "Job terminated."})
+        self._send_json({"status": "ok", "message": "任务已终止。"})
 
     # ── SSE Event Stream ─────────────────────────────────────────────
 
@@ -705,18 +871,18 @@ class ClipVaultHandler(http.server.BaseHTTPRequestHandler):
         if not token:
             token = (params.get("token") or [""])[0]
         if token != self.server_token:
-            self.send_error(401, "Unauthorized: invalid or missing token")
+            self.send_error(401, "未授权：token 缺失或无效")
             return
 
         job_ids = params.get("job_id", [])
         if not job_ids:
-            self.send_error(400, "Missing job_id parameter")
+            self.send_error(400, "缺少 job_id 参数")
             return
         target_id = job_ids[0]
 
         job = _JOB_MANAGER.get_job()
         if job is None or job.job_id != target_id:
-            self.send_error(404, "Job not found")
+            self.send_error(404, "未找到对应任务")
             return
 
         self.send_response(200)
@@ -744,11 +910,15 @@ class ClipVaultHandler(http.server.BaseHTTPRequestHandler):
             self._sse_send("result", json.dumps(job.result))
         if job.error:
             self._sse_send("error", job.error)
-        self._sse_send("done", job.status)
+        self._sse_send("done", json.dumps(_job_done_payload(job), ensure_ascii=False))
 
     def _sse_send(self, event: str, data: str) -> None:
         try:
-            self.wfile.write(f"event: {event}\ndata: {data}\n\n".encode("utf-8"))
+            payload_lines = [f"event: {event}"]
+            for line in str(data).splitlines() or [""]:
+                payload_lines.append(f"data: {line}")
+            payload = "\n".join(payload_lines) + "\n\n"
+            self.wfile.write(payload.encode("utf-8"))
             self.wfile.flush()
         except BrokenPipeError:
             pass
@@ -778,17 +948,18 @@ def run_server(
     )
 
     url = f"http://{host}:{port}/?token={token}"
-    print(f"[ui] server starting at http://{host}:{port}", file=sys.stderr)
-    print(f"[ui] token: {token}", file=sys.stderr)
+    emit_log("ui", f"本地界面服务启动：http://{host}:{port}", level="success")
+    emit_log("ui", f"访问 token：{token}")
 
     if open_browser:
-        print(f"[ui] opening browser...", file=sys.stderr)
+        emit_log("ui", "正在尝试打开浏览器…")
         webbrowser.open(url)
     else:
-        print(f"[ui] open: {url}", file=sys.stderr)
+        emit_log("ui", f"请手动打开：{url}")
 
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\n[ui] shutting down", file=sys.stderr)
+        print(file=sys.stderr)
+        emit_log("ui", "正在关闭本地界面服务")
         server.shutdown()

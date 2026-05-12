@@ -76,6 +76,7 @@ def test_configured_library_root_uses_saved_settings(tmp_path: Path, monkeypatch
         "model": "small",
         "device": "auto",
         "compute_type": "auto",
+        "simplify_chinese": True,
         "cookies": None,
     })
 
@@ -87,6 +88,7 @@ def test_build_queue_run_command_includes_runtime_options(tmp_path: Path):
         "model": "small",
         "device": "cuda",
         "compute_type": "float16",
+        "simplify_chinese": True,
         "cookies": ".secrets/cookies.txt",
     }
 
@@ -100,5 +102,103 @@ def test_build_queue_run_command_includes_runtime_options(tmp_path: Path):
 
 
 def test_build_queue_run_command_rejects_bad_limit(tmp_path: Path):
-    with pytest.raises(ValueError, match="limit must be at least 1"):
+    with pytest.raises(ValueError, match="limit 至少为 1"):
         server.build_queue_run_command(tmp_path, {}, {"limit": 0})
+
+
+def test_build_queue_run_command_can_disable_chinese_simplification(tmp_path: Path):
+    settings = {
+        "model": "small",
+        "device": "cuda",
+        "compute_type": "float16",
+        "simplify_chinese": True,
+        "cookies": None,
+    }
+
+    cmd = server.build_queue_run_command(tmp_path, settings, {"limit": 1, "simplify_chinese": False})
+
+    assert "--no-simplify-chinese" in cmd
+
+
+def test_job_run_persists_failure_logs_and_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    settings_file = tmp_path / "config" / "settings.json"
+    monkeypatch.setattr(server, "settings_path", lambda: settings_file)
+
+    code = (
+        "import sys\n"
+        "sys.stderr.write('[错误][ASR] CUDA 转写失败\\n')\n"
+        "sys.exit(1)\n"
+    )
+    job = server.Job("jobfail01", "video", [sys.executable, "-c", code])
+
+    manager = server.JobManager()
+    manager._run(job)
+
+    assert job.status == "failed"
+    assert "CUDA 转写失败" in (job.error or "")
+    assert "退出码 1" in (job.error or "")
+    assert job.log_dir is not None
+    assert (job.log_dir / "stderr.log").read_text(encoding="utf-8") == "[错误][ASR] CUDA 转写失败\n"
+    assert (job.log_dir / "stdout.txt").read_text(encoding="utf-8") == ""
+
+    snapshot = json.loads((job.log_dir / "job.json").read_text(encoding="utf-8"))
+    assert snapshot["status"] == "failed"
+    assert snapshot["error"] == job.error
+    assert snapshot["log_dir"] == str(job.log_dir)
+    assert snapshot["log_files"]["stderr"] == str(job.log_dir / "stderr.log")
+
+
+def test_prepare_job_logging_creates_snapshot_before_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    settings_file = tmp_path / "config" / "settings.json"
+    monkeypatch.setattr(server, "settings_path", lambda: settings_file)
+
+    job = server.Job("jobprep01", "video", [sys.executable, "-c", "print('ok')"])
+
+    server._prepare_job_logging(job)
+
+    assert job.log_dir is not None
+    snapshot = json.loads((job.log_dir / "job.json").read_text(encoding="utf-8"))
+    assert snapshot["job_id"] == "jobprep01"
+    assert snapshot["status"] == "queued"
+    assert snapshot["log_dir"] == str(job.log_dir)
+    assert snapshot["log_files"]["job"] == str(job.log_dir / "job.json")
+
+
+def test_prepare_job_logging_falls_back_when_default_root_is_unwritable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    blocked = tmp_path / "blocked-root"
+    blocked.write_text("x", encoding="utf-8")
+    monkeypatch.setattr(server, "jobs_root_path", lambda: blocked)
+
+    fallback_root = tmp_path / "library" / "_job_logs"
+    job = server.Job("jobprep02", "video", [sys.executable, "-c", "print('ok')"], log_root=fallback_root)
+
+    server._prepare_job_logging(job)
+
+    assert job.log_dir is not None
+    assert job.log_dir.parent == fallback_root
+    assert any("默认日志目录不可用" in line for line in job.events)
+
+
+def test_job_run_persists_success_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    settings_file = tmp_path / "config" / "settings.json"
+    monkeypatch.setattr(server, "settings_path", lambda: settings_file)
+
+    code = (
+        "import json, sys\n"
+        "sys.stderr.write('[流程] 处理开始\\n')\n"
+        "print(json.dumps({'status': 'ok', 'source': 'subtitle:test', 'segments': 3}, ensure_ascii=False))\n"
+    )
+    job = server.Job("jobsucc01", "video", [sys.executable, "-c", code])
+
+    manager = server.JobManager()
+    manager._run(job)
+
+    assert job.status == "succeeded"
+    assert job.result == {"status": "ok", "source": "subtitle:test", "segments": 3}
+    assert job.log_dir is not None
+    assert json.loads((job.log_dir / "result.json").read_text(encoding="utf-8")) == job.result
+    assert "subtitle:test" in (job.log_dir / "stdout.txt").read_text(encoding="utf-8")
+
+    snapshot = json.loads((job.log_dir / "job.json").read_text(encoding="utf-8"))
+    assert snapshot["status"] == "succeeded"
+    assert snapshot["result"] == job.result

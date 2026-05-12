@@ -34,6 +34,59 @@ async function api(method, path, body) {
   return resp.json();
 }
 
+function parseLogLine(line) {
+  const tags = [...String(line).matchAll(/\[([^\]]+)\]/g)].map((match) => match[1]);
+  const message = String(line).replace(/^(\[[^\]]+\])+\s*/, "");
+  let level = "info";
+  if (tags.includes("错误")) level = "error";
+  else if (tags.includes("警告")) level = "warning";
+  else if (tags.includes("成功")) level = "success";
+  const stage = tags.find((tag) => !["错误", "警告", "成功"].includes(tag)) || "";
+  return { raw: String(line), tags, message, level, stage };
+}
+
+function parseDoneEvent(data) {
+  try {
+    const parsed = JSON.parse(data);
+    if (parsed && typeof parsed === "object") return parsed;
+  } catch (_) {
+    // Fall through to legacy payload parsing.
+  }
+  return { status: String(data || "") };
+}
+
+function updateStatusSummary(el, parsed, fallback) {
+  if (!el) return;
+  const suffix = parsed?.message || fallback || "";
+  if (parsed?.level === "error") {
+    el.className = "status-summary error";
+    el.textContent = parsed.stage ? `${parsed.stage}失败：${suffix}` : `处理失败：${suffix}`;
+    return;
+  }
+  if (parsed?.level === "warning") {
+    el.className = "status-summary warning";
+    el.textContent = parsed.stage ? `当前阶段：${parsed.stage}（${suffix}）` : `注意：${suffix}`;
+    return;
+  }
+  if (parsed?.stage) {
+    el.className = parsed.level === "success" ? "status-summary success" : "status-summary";
+    el.textContent = `当前阶段：${parsed.stage} · ${suffix}`;
+    return;
+  }
+  el.className = "status-summary";
+  el.textContent = fallback || suffix || "处理中";
+}
+
+function appendLogLine(targetEl, summaryEl, line) {
+  const parsed = parseLogLine(line);
+  const row = document.createElement("div");
+  row.className = "log-line" + (parsed.level ? " " + parsed.level : "");
+  row.textContent = parsed.raw;
+  targetEl.appendChild(row);
+  targetEl.scrollTop = targetEl.scrollHeight;
+  updateStatusSummary(summaryEl, parsed, parsed.raw);
+}
+
 // ── Tab Navigation ──────────────────────────────────────────────────
 
 document.querySelectorAll(".nav-tab").forEach((btn) => {
@@ -54,7 +107,7 @@ document.querySelectorAll(".nav-tab").forEach((btn) => {
     el.textContent = "v" + data.version;
     el.className = "nav-status connected";
   } catch (_) {
-    el.textContent = "disconnected";
+    el.textContent = "未连接";
     el.className = "nav-status error";
   }
 })();
@@ -65,11 +118,14 @@ const videoUrl = document.getElementById("video-url");
 const videoSeries = document.getElementById("video-series");
 const videoDevice = document.getElementById("video-device");
 const videoModel = document.getElementById("video-model");
+const videoComputeType = document.getElementById("video-compute-type");
 const videoForce = document.getElementById("video-force");
 const videoKeepAudio = document.getElementById("video-keep-audio");
+const videoSimplifyChinese = document.getElementById("video-simplify-chinese");
 const videoStart = document.getElementById("video-start");
 const videoLog = document.getElementById("video-log");
 const videoLogArea = document.getElementById("video-log-area");
+const videoStatusSummary = document.getElementById("video-status-summary");
 const videoResult = document.getElementById("video-result");
 const videoResultCard = document.getElementById("video-result-card");
 
@@ -90,10 +146,11 @@ async function startVideoJob() {
   videoLog.textContent = "";
   videoLogArea.style.display = "block";
   videoResult.style.display = "none";
+  updateStatusSummary(videoStatusSummary, null, "准备读取设置…");
 
   let settings = {};
   try { settings = await api("GET", "/settings"); } catch (_) {
-    appendLog("", "[settings] failed to read settings, using form/default values");
+    appendLogLine(videoLog, videoStatusSummary, "[警告][设置] 读取设置失败，将使用表单值或默认值");
   }
 
   try {
@@ -104,29 +161,29 @@ async function startVideoJob() {
       keep_audio: videoKeepAudio.checked,
       device: videoDevice.value || settings.device || "auto",
       model: videoModel.value || settings.model || "small",
+      compute_type: videoComputeType.value || settings.compute_type || "auto",
+      simplify_chinese: Boolean(videoSimplifyChinese?.checked),
     };
 
     const resp = await api("POST", "/video", body);
     if (resp.status !== "ok") {
-      appendLog("error", "[error] " + (resp.message || "Failed to start job"));
+      appendLogLine(videoLog, videoStatusSummary, "[错误][流程] " + (resp.message || "启动任务失败"));
       videoStart.disabled = false;
       videoStart.textContent = "开始处理";
       return;
+    }
+    if (resp.log_dir) {
+      appendLogLine(videoLog, videoStatusSummary, "[界面] 任务日志目录：" + resp.log_dir);
     }
 
     const jobId = resp.job_id;
     const events = new EventSource("/api/process/events?job_id=" + jobId + "&token=" + TOKEN);
     let resultShown = false;
+    let lastErrorMessage = "";
+    updateStatusSummary(videoStatusSummary, null, "任务已启动，等待日志…");
 
     events.addEventListener("log", (e) => {
-      const line = e.data;
-      if (line.startsWith("[error]")) {
-        appendLog("error", line);
-      } else if (line.includes("status=ok") || line.includes("status=cached")) {
-        appendLog("success", line);
-      } else {
-        appendLog("", line);
-      }
+      appendLogLine(videoLog, videoStatusSummary, e.data);
     });
 
     events.addEventListener("result", (e) => {
@@ -137,29 +194,35 @@ async function startVideoJob() {
     });
 
     events.addEventListener("error", (e) => {
-      appendLog("error", "[error] " + e.data);
+      lastErrorMessage = String(e.data || "").trim();
+      appendLogLine(videoLog, videoStatusSummary, "[错误][流程] " + lastErrorMessage);
     });
 
-    events.addEventListener("done", () => {
+    events.addEventListener("done", (e) => {
+      const done = parseDoneEvent(e.data);
       events.close();
       videoStart.disabled = false;
       videoStart.textContent = "开始处理";
-      appendLog("", "[done] 处理完成");
+      if (done.log_dir) {
+        appendLogLine(videoLog, videoStatusSummary, "[界面] 任务日志目录：" + done.log_dir);
+      }
+      if (done.status === "succeeded") {
+        appendLogLine(videoLog, videoStatusSummary, "[成功][流程] 处理完成");
+        updateStatusSummary(videoStatusSummary, { level: "success", stage: "流程", message: "处理完成" }, "处理完成");
+        return;
+      }
+      const failure = String(done.error || lastErrorMessage || "任务失败").trim();
+      if (failure && failure !== lastErrorMessage) {
+        appendLogLine(videoLog, videoStatusSummary, "[错误][流程] " + failure);
+      }
+      updateStatusSummary(videoStatusSummary, { level: "error", stage: "流程", message: failure }, failure);
     });
 
   } catch (err) {
-    appendLog("error", "[error] " + err.message);
+    appendLogLine(videoLog, videoStatusSummary, "[错误][流程] " + err.message);
     videoStart.disabled = false;
     videoStart.textContent = "开始处理";
   }
-}
-
-function appendLog(cls, text) {
-  const line = document.createElement("div");
-  line.className = "log-line" + (cls ? " " + cls : "");
-  line.textContent = text;
-  videoLog.appendChild(line);
-  videoLog.scrollTop = videoLog.scrollHeight;
 }
 
 function showResult(data) {
@@ -168,20 +231,27 @@ function showResult(data) {
   const series = data.series || "";
   const source = data.source || "";
   const segments = data.segments ?? "";
+  const asrModel = data.asr_model || "";
+  const asrDevice = data.asr_device || "";
 
   let html = '<div class="flex-col-md">';
 
-  html += '<div><span class="badge ' + (data.status === "ok" ? "badge-success" : "") + '">' + escapeHtml(data.status) + '</span></div>';
+  html += '<div class="flex-row" style="justify-content: space-between; align-items: center;">'
+       + '<span class="badge ' + ((data.status === "ok" || data.status === "cached") ? "badge-success" : "") + '">' + escapeHtml(data.status) + "</span>"
+       + '<span class="small muted">' + (data.status === "cached" ? "直接复用缓存结果" : "已完成新处理") + "</span>"
+       + "</div>";
 
   html += '<table style="width: 100%; border-collapse: collapse;">';
   const rows = [
-    ["标题", data.title],
-    ["创作者", data.uploader],
+    ["标题", displayTitle(data.title)],
+    ["创作者", displayUploader(data.uploader)],
     ["视频 ID", data.video_id],
     ["平台", platform],
     ["系列", series],
     ["字幕来源", source],
     ["片段数", segments],
+    ["ASR 模型", asrModel],
+    ["ASR 设备", asrDevice],
   ];
   for (const [label, val] of rows) {
     if (val) {
@@ -203,7 +273,7 @@ function showResult(data) {
 
   videoResultCard.querySelector(".js-open-folder")?.addEventListener("click", (e) => {
     const path = e.currentTarget.dataset.path;
-    api("POST", "/open-path", { path }).catch(err => appendLog("error", "[error] " + err.message));
+    api("POST", "/open-path", { path }).catch(err => appendLogLine(videoLog, videoStatusSummary, "[错误][界面] " + err.message));
   });
 }
 
@@ -269,10 +339,11 @@ function buildVideoNode(v) {
   const source = String(v.subtitle_source || "");
   const dotClass = source.startsWith("asr:") ? "warning" : v.has_transcript ? "success" : "";
   const label = document.createElement("span");
+  const title = displayTitle(v.title || v.name);
   if (dotClass) {
-    label.innerHTML = '<span class="status-dot ' + dotClass + '"></span> ' + escapeHtml(v.title || v.name);
+    label.innerHTML = '<span class="status-dot ' + dotClass + '"></span> ' + escapeHtml(title);
   } else {
-    label.textContent = v.title || v.name;
+    label.textContent = title;
   }
   return createLeafNode(label, ["video"], () => selectVideo(v));
 }
@@ -355,12 +426,12 @@ async function selectVideo(video) {
     ]);
 
     let html = '<div class="card"><div class="flex-col-md">';
-    html += "<h2>" + escapeHtml(manifest.title || video.name) + "</h2>";
+    html += "<h2>" + escapeHtml(displayTitle(manifest.title || video.name)) + "</h2>";
     html += '<table style="width: 100%; border-collapse: collapse;">';
     const rows = [
       ["视频 ID", manifest.video_id],
       ["平台", manifest.platform],
-      ["创作者", manifest.uploader],
+      ["创作者", displayUploader(manifest.uploader)],
       ["系列", manifest.series],
       ["字幕来源", manifest.subtitle_source],
       ["时长", manifest.duration ? Math.floor(manifest.duration / 60) + "m" : ""],
@@ -485,7 +556,7 @@ async function fetchCreator(selector, btn) {
         const dotClass = entry.library_status === "processed" ? "success" : "";
         html += '<div class="flex-row" style="padding: 2px 0; font-size: 13px;">'
               + '<span class="status-dot ' + dotClass + '" style="margin-right: 8px;"></span>'
-              + "<span>" + escapeHtml(entry.title || "untitled") + "</span>"
+              + "<span>" + escapeHtml(displayTitle(entry.title)) + "</span>"
               + ' <span class="muted small">' + (entry.library_status === "processed" ? "已处理" : "新") + "</span>"
               + "</div>";
       }
@@ -521,8 +592,10 @@ const queueRunLimit = document.getElementById("queue-run-limit");
 const queueRetryFailed = document.getElementById("queue-retry-failed");
 const queueKeepAudio = document.getElementById("queue-keep-audio");
 const queueVerbose = document.getElementById("queue-verbose");
+const queueSimplifyChinese = document.getElementById("queue-simplify-chinese");
 const queueLogArea = document.getElementById("queue-log-area");
 const queueLog = document.getElementById("queue-log");
+const queueStatusSummary = document.getElementById("queue-status-summary");
 
 let _queueFilter = "all";
 let _queueData = { jobs: [] };
@@ -593,7 +666,7 @@ function renderQueueJobs(data) {
     html += '<div class="card" style="padding: var(--spacing-md); display: flex; justify-content: space-between; align-items: center;">'
       +   "<div>"
       +     '<span class="status-dot ' + statusColor + '" style="margin-right: 8px;"></span>'
-      +     "<strong>" + escapeHtml(job.title || "untitled") + "</strong>"
+      +     "<strong>" + escapeHtml(displayTitle(job.title)) + "</strong>"
       +     ' <span class="small muted">' + escapeHtml(job.platform || "") + "</span>"
       +     '<p class="small muted">' + escapeHtml(job.source_url || "") + "</p>"
       +   "</div>"
@@ -640,6 +713,7 @@ async function startQueueRun() {
   queueRunBtn.textContent = "运行中...";
   queueLog.textContent = "";
   queueLogArea.style.display = "block";
+  updateStatusSummary(queueStatusSummary, null, "准备启动队列…");
 
   try {
     const limit = Math.max(1, parseInt(queueRunLimit.value || "1", 10));
@@ -648,43 +722,58 @@ async function startQueueRun() {
       retry_failed: queueRetryFailed.checked,
       keep_audio: queueKeepAudio.checked,
       verbose: queueVerbose.checked,
+      simplify_chinese: Boolean(queueSimplifyChinese?.checked),
     });
     if (resp.status !== "ok") {
-      appendQueueLog("error", "[error] " + (resp.message || "Failed to start queue run"));
+      appendQueueLog("[错误][队列] " + (resp.message || "启动队列任务失败"));
       queueRunBtn.disabled = false;
       queueRunBtn.textContent = "运行队列";
       return;
     }
+    if (resp.log_dir) {
+      appendQueueLog("[界面] 任务日志目录：" + resp.log_dir);
+    }
 
     const events = new EventSource("/api/process/events?job_id=" + encodeURIComponent(resp.job_id) + "&token=" + encodeURIComponent(TOKEN));
+    let lastErrorMessage = "";
+    updateStatusSummary(queueStatusSummary, null, "队列任务已启动，等待日志…");
 
     events.addEventListener("log", (e) => {
-      const line = e.data;
-      appendQueueLog(line.startsWith("[error]") ? "error" : "", line);
+      appendQueueLog(e.data);
     });
     events.addEventListener("error", (e) => {
-      appendQueueLog("error", "[error] " + e.data);
+      lastErrorMessage = String(e.data || "").trim();
+      appendQueueLog("[错误][队列] " + lastErrorMessage);
     });
-    events.addEventListener("done", async () => {
+    events.addEventListener("done", async (e) => {
+      const done = parseDoneEvent(e.data);
       events.close();
       queueRunBtn.disabled = false;
       queueRunBtn.textContent = "运行队列";
-      appendQueueLog("", "[done] 队列运行结束");
+      if (done.log_dir) {
+        appendQueueLog("[界面] 任务日志目录：" + done.log_dir);
+      }
+      if (done.status === "succeeded") {
+        appendQueueLog("[成功][队列] 队列运行结束");
+        updateStatusSummary(queueStatusSummary, { level: "success", stage: "队列", message: "队列运行结束" }, "队列运行结束");
+      } else {
+        const failure = String(done.error || lastErrorMessage || "队列任务失败").trim();
+        if (failure && failure !== lastErrorMessage) {
+          appendQueueLog("[错误][队列] " + failure);
+        }
+        updateStatusSummary(queueStatusSummary, { level: "error", stage: "队列", message: failure }, failure);
+      }
       await loadQueue();
     });
   } catch (err) {
-    appendQueueLog("error", "[error] " + err.message);
+    appendQueueLog("[错误][队列] " + err.message);
     queueRunBtn.disabled = false;
     queueRunBtn.textContent = "运行队列";
   }
 }
 
-function appendQueueLog(cls, text) {
-  const line = document.createElement("div");
-  line.className = "log-line" + (cls ? " " + cls : "");
-  line.textContent = text;
-  queueLog.appendChild(line);
-  queueLog.scrollTop = queueLog.scrollHeight;
+function appendQueueLog(text) {
+  appendLogLine(queueLog, queueStatusSummary, text);
 }
 
 // ── Settings ──────────────────────────────────────────────────────
@@ -692,6 +781,8 @@ function appendQueueLog(cls, text) {
 const setLibrary = document.getElementById("set-library");
 const setModel = document.getElementById("set-model");
 const setDevice = document.getElementById("set-device");
+const setComputeType = document.getElementById("set-compute-type");
+const setSimplifyChinese = document.getElementById("set-simplify-chinese");
 const setCookies = document.getElementById("set-cookies");
 const setSave = document.getElementById("settings-save");
 
@@ -703,6 +794,10 @@ async function loadSettingsForm() {
     if (setLibrary) setLibrary.value = s.library || "";
     if (setModel) setModel.value = s.model || "small";
     if (setDevice) setDevice.value = s.device || "auto";
+    if (setComputeType) setComputeType.value = s.compute_type || "auto";
+    if (setSimplifyChinese) setSimplifyChinese.checked = s.simplify_chinese !== false;
+    if (videoSimplifyChinese) videoSimplifyChinese.checked = s.simplify_chinese !== false;
+    if (queueSimplifyChinese) queueSimplifyChinese.checked = s.simplify_chinese !== false;
     if (setCookies) setCookies.value = s.cookies || "";
   } catch (_) {}
 }
@@ -715,6 +810,8 @@ async function saveSettings() {
       library: setLibrary.value,
       model: setModel.value,
       device: setDevice.value,
+      compute_type: setComputeType.value || "auto",
+      simplify_chinese: Boolean(setSimplifyChinese?.checked),
       cookies: setCookies.value || null,
     };
     await api("POST", "/settings", payload);
@@ -742,6 +839,22 @@ function escapeHtml(str) {
     .replace(/'/g, "&#39;");
 }
 
+function displayValue(value, fallback) {
+  const text = String(value || "").trim();
+  if (!text || text === "untitled" || text === "unknown" || text === "unknown-uploader" || text === "unknown creator") {
+    return fallback;
+  }
+  return text;
+}
+
+function displayTitle(value) {
+  return displayValue(value, "未命名视频");
+}
+
+function displayUploader(value) {
+  return displayValue(value, "未知创作者");
+}
+
 // ── Tab Switch Handler ────────────────────────────────────────────
 
 function onTabSwitch(tab) {
@@ -760,3 +873,5 @@ function onTabSwitch(tab) {
       break;
   }
 }
+
+loadSettingsForm();
