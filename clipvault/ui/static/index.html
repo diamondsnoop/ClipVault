@@ -7,181 +7,216 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+<div id="app-shell" class="app-shell">
+  <aside class="app-sidebar">
+    <a class="brand" href="/">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">ClipVault</span>
+    </a>
 
-<nav id="top-nav">
-  <a class="nav-brand" href="/">ClipVault</a>
-  <div class="nav-tabs">
-    <button class="nav-tab active" data-tab="video">视频</button>
-    <button class="nav-tab" data-tab="library">仓库</button>
-    <button class="nav-tab" data-tab="creators">创作者</button>
-    <button class="nav-tab" data-tab="queue">队列</button>
-    <button class="nav-tab" data-tab="settings">设置</button>
-  </div>
-  <div id="nav-status" class="nav-status"></div>
-</nav>
+    <nav class="side-nav" aria-label="主导航">
+      <button class="side-nav-item active" data-tab="home" type="button">
+        <span class="nav-icon" aria-hidden="true">⌂</span>
+        <span class="nav-label">主页</span>
+      </button>
+      <button class="side-nav-item" data-tab="settings" type="button">
+        <span class="nav-icon" aria-hidden="true">⚙</span>
+        <span class="nav-label">设置</span>
+      </button>
+    </nav>
 
-<main id="main-content">
-  <!-- ── Video Tab ── -->
-  <section id="tab-video" class="tab-pane active">
-    <h1>处理新视频</h1>
-    <p class="muted mb-lg">输入视频 URL，ClipVault 将自动获取字幕或在无字幕时运行本地语音识别。</p>
+    <button id="sidebar-toggle" class="sidebar-toggle" type="button">
+      <span class="collapse-icon" aria-hidden="true">«</span>
+      <span class="nav-label">收起侧边栏</span>
+    </button>
+  </aside>
 
-    <div class="card">
-      <div class="flex-col-md">
-        <input type="text" id="video-url" class="text-input" placeholder="视频 URL (Bilibili, YouTube 等)" />
+  <main id="main-content">
+    <section id="tab-home" class="tab-pane active">
+      <div class="home-topbar">
+        <div></div>
+        <div id="env-status" class="env-status">
+          <span class="env-dot"></span>
+          <span>正在连接本地库...</span>
+        </div>
+      </div>
 
-        <div class="flex-row" style="flex-wrap: wrap;">
-          <input type="text" id="video-series" class="text-input" placeholder='--series "系列名称"' style="flex: 1; min-width: 180px;" />
-          <select id="video-device" class="text-input" style="width: auto;">
-            <option value="auto">auto (默认)</option>
-            <option value="cuda">CUDA</option>
-            <option value="cpu">CPU</option>
-          </select>
-          <select id="video-model" class="text-input" style="width: auto;">
-            <option value="small">small (默认)</option>
-            <option value="tiny">tiny</option>
-            <option value="medium">medium</option>
-            <option value="large-v3">large-v3</option>
-          </select>
-          <select id="video-compute-type" class="text-input" style="width: auto;">
-            <option value="">计算类型（跟随设置）</option>
-            <option value="auto">auto</option>
-            <option value="int8">int8</option>
-            <option value="int8_float16">int8_float16</option>
-            <option value="float16">float16</option>
-            <option value="float32">float32</option>
-          </select>
-          <label class="flex-row" style="cursor: pointer; white-space: nowrap;">
-            <input type="checkbox" id="video-force" /> 强制重处理
-          </label>
-          <label class="flex-row" style="cursor: pointer; white-space: nowrap;">
-            <input type="checkbox" id="video-keep-audio" /> 保留音频
-          </label>
-          <label class="flex-row" style="cursor: pointer; white-space: nowrap;">
-            <input type="checkbox" id="video-simplify-chinese" checked /> 中文转简
+      <section id="intake-section" class="home-card intake-card">
+        <div class="module-head">
+          <div>
+            <h1>获取字幕</h1>
+            <p>把视频里的语言安静收藏到本地。</p>
+          </div>
+          <button id="intake-collapse" class="btn-secondary btn-small intake-collapse-button" type="button">收起获取区</button>
+        </div>
+
+        <div id="intake-body" class="intake-body">
+          <div class="intake-mode-tabs" role="tablist" aria-label="获取字幕模式">
+            <button class="mode-tab active" data-intake-mode="video" type="button">视频</button>
+            <button class="mode-tab" data-intake-mode="collection" type="button">合集</button>
+            <button class="mode-tab" data-intake-mode="source" type="button">来源</button>
+          </div>
+
+          <div class="intake-grid">
+            <div class="intake-form">
+              <p id="intake-description" class="mode-description">粘贴单个视频链接，ClipVault 会优先获取平台字幕；没有字幕时再使用本地 ASR。</p>
+
+              <label class="field-block">
+                <span id="intake-primary-label">视频链接</span>
+                <input id="intake-primary" class="text-input" type="text" placeholder="例如：https://www.bilibili.com/video/BV..." />
+              </label>
+
+              <label class="field-block">
+                <span id="intake-secondary-label">保存到合集（可选）</span>
+                <input id="intake-secondary" class="text-input" type="text" placeholder="例如：AI 工具观察" />
+              </label>
+
+              <details id="intake-advanced" class="advanced-options">
+                <summary>高级选项</summary>
+                <div class="advanced-grid">
+                  <label>
+                    <span>ASR 模型</span>
+                    <select id="intake-model" class="text-input">
+                      <option value="small">small</option>
+                      <option value="tiny">tiny</option>
+                      <option value="medium">medium</option>
+                      <option value="large-v3">large-v3</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>设备</span>
+                    <select id="intake-device" class="text-input">
+                      <option value="auto">自动选择</option>
+                      <option value="cuda">CUDA</option>
+                      <option value="cpu">CPU</option>
+                    </select>
+                  </label>
+                  <label class="check-row">
+                    <input id="intake-force" type="checkbox" />
+                    <span>强制重处理</span>
+                  </label>
+                  <label class="check-row">
+                    <input id="intake-keep-audio" type="checkbox" />
+                    <span>保留音频</span>
+                  </label>
+                </div>
+              </details>
+
+              <button id="intake-start" class="btn-primary" type="button">开始获取字幕</button>
+            </div>
+
+            <aside class="status-panel">
+              <div class="status-panel-head">
+                <h2>当前状态</h2>
+                <button id="detail-log-toggle" class="text-button" type="button">查看详细日志</button>
+              </div>
+              <div id="human-status-empty" class="human-empty">当前没有正在处理的内容。开始获取字幕后，进度会显示在这里。</div>
+              <ol id="human-steps" class="human-steps"></ol>
+              <div class="progress-row">
+                <div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div>
+                <span id="progress-label">0%</span>
+              </div>
+              <div id="detail-log-box" class="detail-log-box collapsed">
+                <div id="detail-log-actions" class="detail-actions"></div>
+                <div id="detail-log" class="log-console"></div>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      <section class="home-card favorites-card">
+        <div class="module-head compact">
+          <div>
+            <h1>收藏夹</h1>
+            <p>你的字幕库，支持全文搜索。</p>
+          </div>
+        </div>
+
+        <div class="library-toolbar">
+          <div class="library-tabs" role="tablist" aria-label="收藏夹模式">
+            <button class="mode-tab active" data-library-mode="subtitles" type="button">字幕</button>
+            <button class="mode-tab" data-library-mode="collections" type="button">合集</button>
+            <button class="mode-tab" data-library-mode="sources" type="button">来源</button>
+          </div>
+          <label class="search-wrap">
+            <span aria-hidden="true">⌕</span>
+            <input id="library-search" type="search" placeholder="搜索字幕、标题、创作者或某句话..." />
           </label>
         </div>
 
-        <button id="video-start" class="btn-primary">开始处理</button>
-      </div>
-    </div>
+        <div id="library-list" class="library-list"></div>
+      </section>
+    </section>
 
-    <div id="video-log-area" style="display: none;">
-      <h2 class="mt-lg mb-md">处理日志</h2>
-      <div id="video-status-summary" class="status-summary">等待任务开始</div>
-      <div id="video-log-actions" class="action-row"></div>
-      <div id="video-log" class="log-console"></div>
-    </div>
-
-    <div id="video-result" style="display: none;">
-      <h2 class="mt-lg mb-md">处理完成</h2>
-      <div class="card" id="video-result-card"></div>
-    </div>
-  </section>
-
-  <!-- ── Library Tab ── -->
-  <section id="tab-library" class="tab-pane">
-    <div class="flex-row" style="justify-content: space-between; align-items: center;">
-      <h1>仓库</h1>
-      <button id="library-rebuild" class="btn-secondary btn-small">重建索引</button>
-    </div>
-    <div class="split-layout">
-      <aside>
-        <div id="library-tree" class="tree"><p class="muted">切换到仓库标签以加载</p></div>
-      </aside>
-      <main>
-        <div id="library-detail">
-          <p class="muted">选择一个视频查看详情</p>
+    <section id="tab-settings" class="tab-pane">
+      <div class="settings-page">
+        <div class="settings-head">
+          <h1>设置</h1>
+          <p>把机器参数和本地路径收在这里，主页只保留常用流程。</p>
         </div>
-      </main>
-    </div>
-  </section>
 
-  <!-- ── Creators Tab ── -->
-  <section id="tab-creators" class="tab-pane">
-    <h1>创作者</h1>
-    <div class="card">
-      <h2 class="mb-md">添加创作者</h2>
-      <div class="flex-row">
-        <input type="text" id="creator-url" class="text-input" placeholder="创作者 URL (Bilibili, YouTube 等)" style="flex: 2;" />
-        <input type="text" id="creator-name" class="text-input" placeholder="名称（可选）" style="flex: 1;" />
-        <button id="creator-add" class="btn-primary">添加</button>
-      </div>
-    </div>
-    <div id="creator-list">
-      <p class="muted">切换到创作者标签以加载</p>
-    </div>
-  </section>
+        <div class="settings-grid">
+          <section class="settings-card">
+            <h2>本地字幕库</h2>
+            <label class="field-block">
+              <span>字幕库路径</span>
+              <input id="set-library" class="text-input" type="text" placeholder="E:/myproject/ClipVault/library" />
+            </label>
+            <div class="settings-actions">
+              <button id="settings-rebuild" class="btn-secondary" type="button">重建索引</button>
+            </div>
+          </section>
 
-  <!-- ── Queue Tab ── -->
-  <section id="tab-queue" class="tab-pane">
-    <div class="flex-row" style="justify-content: space-between; align-items: center; flex-wrap: wrap;">
-      <h1>队列</h1>
-      <div class="flex-row">
-        <input type="number" id="queue-run-limit" class="text-input" min="1" value="1" style="width: 88px;" />
-        <label class="flex-row" style="cursor: pointer; white-space: nowrap;">
-          <input type="checkbox" id="queue-retry-failed" /> 重试失败
-        </label>
-        <label class="flex-row" style="cursor: pointer; white-space: nowrap;">
-          <input type="checkbox" id="queue-keep-audio" /> 保留音频
-        </label>
-        <label class="flex-row" style="cursor: pointer; white-space: nowrap;">
-          <input type="checkbox" id="queue-verbose" /> 详细日志
-        </label>
-        <label class="flex-row" style="cursor: pointer; white-space: nowrap;">
-          <input type="checkbox" id="queue-simplify-chinese" checked /> 中文转简
-        </label>
-        <button id="queue-run" class="btn-secondary btn-small">运行队列</button>
-      </div>
-    </div>
-    <div id="queue-status" class="card"><p class="muted">切换到队列标签以加载</p></div>
-    <div id="queue-list"></div>
-    <div id="queue-log-area" style="display: none;">
-      <h2 class="mt-lg mb-md">运行日志</h2>
-      <div id="queue-status-summary" class="status-summary">等待任务开始</div>
-      <div id="queue-log-actions" class="action-row"></div>
-      <div id="queue-log" class="log-console"></div>
-    </div>
-  </section>
+          <section class="settings-card">
+            <h2>字幕获取</h2>
+            <label class="field-block">
+              <span>默认 ASR 模型</span>
+              <select id="set-model" class="text-input">
+                <option value="tiny">tiny</option>
+                <option value="small">small</option>
+                <option value="medium">medium</option>
+                <option value="large-v3">large-v3</option>
+              </select>
+            </label>
+            <label class="field-block">
+              <span>默认设备</span>
+              <select id="set-device" class="text-input">
+                <option value="auto">自动选择</option>
+                <option value="cuda">CUDA</option>
+                <option value="cpu">CPU</option>
+              </select>
+            </label>
+            <label class="field-block">
+              <span>计算类型</span>
+              <select id="set-compute-type" class="text-input">
+                <option value="auto">auto</option>
+                <option value="int8">int8</option>
+                <option value="int8_float16">int8_float16</option>
+                <option value="float16">float16</option>
+                <option value="float32">float32</option>
+              </select>
+            </label>
+            <label class="check-row">
+              <input id="set-simplify-chinese" type="checkbox" checked />
+              <span>ASR 中文默认转简</span>
+            </label>
+          </section>
 
-  <!-- ── Settings Tab ── -->
-  <section id="tab-settings" class="tab-pane">
-    <h1>设置</h1>
-    <div class="card">
-      <div class="flex-col-md">
-        <label>仓库路径</label>
-        <input type="text" id="set-library" class="text-input" placeholder="E:/myproject/ClipVault/library" />
-        <label>Whisper 模型</label>
-        <select id="set-model" class="text-input">
-          <option value="tiny">tiny</option>
-          <option value="small" selected>small</option>
-          <option value="medium">medium</option>
-          <option value="large-v3">large-v3</option>
-        </select>
-        <label>设备</label>
-        <select id="set-device" class="text-input">
-          <option value="auto">auto (默认)</option>
-          <option value="cuda">CUDA</option>
-          <option value="cpu">CPU</option>
-        </select>
-        <label>计算类型</label>
-        <select id="set-compute-type" class="text-input">
-          <option value="auto">auto</option>
-          <option value="int8">int8</option>
-          <option value="int8_float16">int8_float16</option>
-          <option value="float16">float16</option>
-          <option value="float32">float32</option>
-        </select>
-        <label class="flex-row" style="cursor: pointer; align-self: flex-start;">
-          <input type="checkbox" id="set-simplify-chinese" checked /> ASR 中文默认转简
-        </label>
-        <label>Cookie 文件路径</label>
-        <input type="text" id="set-cookies" class="text-input" placeholder="可选" />
-        <button id="settings-save" class="btn-primary" style="align-self: flex-start;">保存设置</button>
+          <section class="settings-card">
+            <h2>平台登录</h2>
+            <label class="field-block">
+              <span>Cookie 文件路径</span>
+              <input id="set-cookies" class="text-input" type="text" placeholder="可选" />
+            </label>
+          </section>
+        </div>
+
+        <button id="settings-save" class="btn-primary" type="button">保存设置</button>
       </div>
-    </div>
-  </section>
-</main>
+    </section>
+  </main>
+</div>
 
 <script src="/app.js"></script>
 </body>

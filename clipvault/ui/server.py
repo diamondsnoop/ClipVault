@@ -149,8 +149,8 @@ class JobManager:
 
             if proc.returncode == 0 and stdout:
                 try:
-                    job.result = json.loads(stdout)
-                except json.JSONDecodeError as exc:
+                    job.result = _parse_job_stdout_json(stdout)
+                except (json.JSONDecodeError, ValueError) as exc:
                     job.error = f"任务已结束，但返回结果不是有效 JSON：{exc}"
                     job.error_context = _stderr_tail(job.events)
                     job.status = "failed"
@@ -336,6 +336,27 @@ def _summarize_job_failure(stdout: str, error_context: list[str], returncode: in
     if returncode is None:
         return "任务失败。"
     return f"任务失败，退出码 {returncode}。"
+
+
+def _parse_job_stdout_json(stdout: str) -> Any:
+    text = stdout.strip()
+    if not text:
+        raise ValueError("stdout 为空")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as direct_error:
+        decoder = json.JSONDecoder()
+        for index, char in enumerate(stdout):
+            if char not in "{[":
+                continue
+            try:
+                result, end = decoder.raw_decode(stdout[index:])
+            except json.JSONDecodeError:
+                continue
+            if stdout[index + end:].strip():
+                continue
+            return result
+        raise direct_error
 
 
 def _job_directory_name(job: Job) -> str:

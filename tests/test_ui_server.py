@@ -202,3 +202,23 @@ def test_job_run_persists_success_result(tmp_path: Path, monkeypatch: pytest.Mon
     snapshot = json.loads((job.log_dir / "job.json").read_text(encoding="utf-8"))
     assert snapshot["status"] == "succeeded"
     assert snapshot["result"] == job.result
+
+
+def test_job_run_accepts_progress_lines_before_json_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    settings_file = tmp_path / "config" / "settings.json"
+    monkeypatch.setattr(server, "settings_path", lambda: settings_file)
+
+    code = (
+        "import json\n"
+        "print('[download] 100% of 44.90MiB')\n"
+        "print(json.dumps({'status': 'ok', 'source': 'asr:faster-whisper', 'segments': 3}, ensure_ascii=False, indent=2))\n"
+    )
+    job = server.Job("jobsucc02", "video", [sys.executable, "-c", code])
+
+    manager = server.JobManager()
+    manager._run(job)
+
+    assert job.status == "succeeded"
+    assert job.result == {"status": "ok", "source": "asr:faster-whisper", "segments": 3}
+    assert job.log_dir is not None
+    assert json.loads((job.log_dir / "result.json").read_text(encoding="utf-8")) == job.result
