@@ -1,5 +1,6 @@
 const params = new URLSearchParams(window.location.search);
 const TOKEN_STORAGE_KEY = "clipvault.ui.token";
+const SIDEBAR_STORAGE_KEY = "clipvault.sidebarCollapsed";
 const urlToken = params.get("token") || "";
 if (urlToken) sessionStorage.setItem(TOKEN_STORAGE_KEY, urlToken);
 const TOKEN = urlToken || sessionStorage.getItem(TOKEN_STORAGE_KEY) || "";
@@ -35,15 +36,15 @@ const intakeConfigs = {
     button: "开始获取字幕",
   },
   collection: {
-    description: "解析合集后先预览视频列表，你可以选择全部获取，或只获取未收藏的视频。",
+    description: "合集清单解析正在接入。当前可先用视频模式逐条获取，并填写同一个合集名。",
     primaryLabel: "合集链接",
     primaryPlaceholder: "粘贴 Bilibili 合集 / YouTube 播放列表链接",
     secondaryLabel: "保存名称（可选）",
     secondaryPlaceholder: "例如：AI 课程合集",
-    button: "解析合集",
+    button: "查看当前用法",
   },
   source: {
-    description: "保存为来源后，可以检查新视频并批量归档字幕。",
+    description: "保存为来源后，可以检查最近视频；批量勾选获取会在下一步接入。",
     primaryLabel: "来源链接",
     primaryPlaceholder: "粘贴 UP 主主页 / YouTube 频道链接",
     secondaryLabel: "来源名称（可选）",
@@ -152,8 +153,21 @@ function parseDoneEvent(data) {
   return { status: String(data || "") };
 }
 
+function resetWorkflowSteps(labels = humanStepTemplates) {
+  humanSteps = labels.map((label) => ({ label, state: "idle" }));
+}
+
+function setWorkflowSteps(labels, currentIndex = 0) {
+  resetWorkflowSteps(labels);
+  if (Number.isInteger(currentIndex) && humanSteps[currentIndex]) {
+    humanSteps[currentIndex].state = "current";
+  }
+  renderHumanStatus();
+}
+
 function setHumanSteps(index, status) {
-  humanSteps = humanStepTemplates.map((label, i) => {
+  const labels = humanSteps.length ? humanSteps.map((step) => step.label) : humanStepTemplates;
+  humanSteps = labels.map((label, i) => {
     if (i < index) return { label, state: "done" };
     if (i === index) return { label, state: status || "current" };
     return { label, state: "idle" };
@@ -161,20 +175,31 @@ function setHumanSteps(index, status) {
   renderHumanStatus();
 }
 
+function updateWorkflowStep(index, status) {
+  if (!humanSteps[index]) return;
+  humanSteps = humanSteps.map((step, i) => (
+    i === index ? { ...step, state: status } : step
+  ));
+  renderHumanStatus();
+}
+
 function setAllStepsDone() {
-  humanSteps = humanStepTemplates.map((label) => ({ label, state: "done" }));
+  const labels = humanSteps.length ? humanSteps.map((step) => step.label) : humanStepTemplates;
+  humanSteps = labels.map((label) => ({ label, state: "done" }));
   renderHumanStatus(100);
 }
 
 function resetHumanStatus() {
   state.rawLog = [];
   state.logDir = "";
-  humanSteps = humanStepTemplates.map((label) => ({ label, state: "idle" }));
+  resetWorkflowSteps();
   renderHumanStatus(0);
   renderDetailLog();
 }
 
 function inferStepFromLog(line) {
+  // This is a best-effort UX bridge for existing human-readable logs.
+  // Raw logs remain the debug source of truth when wording changes.
   const text = String(line || "");
   if (/元数据|视频信息|识别平台|缓存/.test(text)) return 0;
   if (/字幕|平台字幕|ASR|音频/.test(text)) return 1;
@@ -251,6 +276,18 @@ async function openLocalPath(path) {
   await api("POST", "/open-path", { path });
 }
 
+function setSidebarCollapsed(collapsed, persist = false) {
+  state.sidebarCollapsed = Boolean(collapsed);
+  $("app-shell")?.classList.toggle("sidebar-collapsed", state.sidebarCollapsed);
+  const icon = document.querySelector(".collapse-icon");
+  if (icon) icon.textContent = state.sidebarCollapsed ? "»" : "«";
+  if (persist) {
+    try {
+      localStorage.setItem(SIDEBAR_STORAGE_KEY, state.sidebarCollapsed ? "1" : "0");
+    } catch (_) {}
+  }
+}
+
 function bindNavigation() {
   document.querySelectorAll(".side-nav-item").forEach((button) => {
     button.addEventListener("click", () => {
@@ -263,10 +300,7 @@ function bindNavigation() {
   });
 
   $("sidebar-toggle")?.addEventListener("click", () => {
-    state.sidebarCollapsed = !state.sidebarCollapsed;
-    $("app-shell")?.classList.toggle("sidebar-collapsed", state.sidebarCollapsed);
-    const icon = document.querySelector(".collapse-icon");
-    if (icon) icon.textContent = state.sidebarCollapsed ? "»" : "«";
+    setSidebarCollapsed(!state.sidebarCollapsed, true);
   });
 }
 
@@ -388,15 +422,8 @@ function previewCollection() {
     $("intake-primary")?.focus();
     return;
   }
-  humanSteps = [
-    { label: "读取合集链接", state: "done" },
-    { label: "等待预览接入", state: "current" },
-    { label: "选择未收藏视频", state: "idle" },
-    { label: "批量归档字幕", state: "idle" },
-    { label: "出现在收藏夹", state: "idle" },
-  ];
-  state.rawLog.push(parseLogLine("[信息][合集] 合集预览界面已就绪，批量解析后端将在后续接入。"));
-  renderHumanStatus();
+  setWorkflowSteps(["读取合集链接", "说明当前可用方式", "等待合集清单解析接入"], 1);
+  state.rawLog.push(parseLogLine("[信息][合集] 当前版本还不能直接解析合集清单。请先在“视频”模式逐个粘贴视频，并填写“保存到合集”；合集页会聚合这些已归档字幕。"));
   renderDetailLog();
 }
 
@@ -410,25 +437,18 @@ async function checkSource() {
   }
   $("intake-start").disabled = true;
   $("intake-start").textContent = "正在检查...";
-  humanSteps = [
-    { label: "保存来源", state: "current" },
-    { label: "检查新视频", state: "idle" },
-    { label: "标记已收藏内容", state: "idle" },
-    { label: "等待选择归档", state: "idle" },
-    { label: "出现在收藏夹", state: "idle" },
-  ];
-  renderHumanStatus();
+  setWorkflowSteps(["保存来源", "检查新视频", "标记已收藏内容", "等待批量获取接入"], 0);
   try {
     const added = await api("POST", "/creators/add", { source_url: sourceUrl, name: sourceName || undefined });
-    humanSteps[0].state = "done";
-    humanSteps[1].state = "current";
-    renderHumanStatus();
+    updateWorkflowStep(0, "done");
+    updateWorkflowStep(1, "current");
     const selector = added.creator?.id || sourceName || sourceUrl;
     const result = await api("POST", "/creators/fetch", { selector, limit: 10 });
-    humanSteps[1].state = "done";
-    humanSteps[2].state = "done";
-    humanSteps[3].state = "current";
+    updateWorkflowStep(1, "done");
+    updateWorkflowStep(2, "done");
+    updateWorkflowStep(3, "current");
     appendRuntimeLog(`[成功][来源] 发现 ${result.new_count || 0} 个新视频，${result.processed_count || 0} 个已收藏。`);
+    appendRuntimeLog("[信息][来源] 当前 Web UI 已完成来源登记和检查；批量勾选获取会在合集/来源资产化链路中接入。");
     await loadHomeData();
   } catch (err) {
     appendRuntimeLog(`[错误][来源] ${err.message}`);
@@ -564,15 +584,83 @@ function renderSubtitleCards(container) {
       </div>
       <div class="subtitle-side">
         <div class="subtitle-date">${escapeHtml(formatDate(video.processed_at || video.upload_date))}</div>
-        <button class="text-button js-open-subtitle" data-path="${escapeHtml(video.relative_path || "")}" type="button">打开字幕 ↗</button>
+        <button class="text-button js-read-subtitle" data-index="${index}" type="button">查看字幕</button>
       </div>
     </article>`;
   }).join("");
-  container.querySelectorAll(".js-open-subtitle").forEach((button) => {
-    button.addEventListener("click", () => openLocalPath(button.dataset.path));
+  container.querySelectorAll(".js-read-subtitle").forEach((button) => {
+    button.addEventListener("click", () => openTranscriptReader(videos[Number(button.dataset.index)]));
   });
   appendLoadMore(container, allVideos.length);
   hydrateSnippets(videos);
+}
+
+async function openTranscriptReader(video) {
+  if (!video?.relative_path) return;
+  const overlay = $("reader-overlay");
+  const title = $("reader-title");
+  const meta = $("reader-meta");
+  const body = $("reader-content");
+  const folderButton = $("reader-open-folder");
+  if (!overlay || !title || !meta || !body) return;
+
+  title.textContent = displayTitle(video.title || video.name);
+  meta.textContent = [
+    displayUploader(video.uploader || video.creator),
+    video.platform,
+    sourceLabel(video.subtitle_source, video.subtitle_source_label),
+    formatDuration(video.duration),
+  ].filter(Boolean).join(" · ");
+  body.textContent = "正在读取字幕...";
+  overlay.classList.remove("hidden");
+  document.body.classList.add("reader-open");
+  folderButton?.setAttribute("data-path", video.relative_path);
+
+  try {
+    const data = await api("GET", "/library/transcript?path=" + encodeURIComponent(video.relative_path));
+    if (!data.has_transcript) {
+      body.textContent = "这个条目还没有可读取的字幕文件。";
+      return;
+    }
+    body.textContent = formatTranscriptForReading(data.content || "", data.format || "");
+  } catch (err) {
+    body.textContent = `读取字幕失败：${err.message}`;
+  }
+}
+
+function formatTranscriptForReading(content, format) {
+  let text = String(content || "");
+  if (format === "srt" || format === "vtt") {
+    text = text
+      .replace(/^\d+\s*$/gm, "")
+      .replace(/^\d{2}:\d{2}:\d{2}[,.]\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}[,.]\d{3}.*$/gm, "")
+      .replace(/^WEBVTT.*$/gm, "");
+  }
+  return text
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/^#+\s*/gm, "")
+    .replace(/^-?\s*`?(\d{1,2}:\d{2}(?::\d{2})?)`?\s*/gm, "[$1] ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim() || "字幕文件为空。";
+}
+
+function closeTranscriptReader() {
+  $("reader-overlay")?.classList.add("hidden");
+  document.body.classList.remove("reader-open");
+}
+
+function bindTranscriptReader() {
+  $("reader-close")?.addEventListener("click", closeTranscriptReader);
+  $("reader-overlay")?.addEventListener("click", (event) => {
+    if (event.target === $("reader-overlay")) closeTranscriptReader();
+  });
+  $("reader-open-folder")?.addEventListener("click", (event) => {
+    const path = event.currentTarget.dataset.path;
+    if (path) openLocalPath(path);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeTranscriptReader();
+  });
 }
 
 function appendLoadMore(container, total) {
@@ -780,9 +868,15 @@ async function saveSettings() {
 }
 
 function init() {
+  try {
+    setSidebarCollapsed(localStorage.getItem(SIDEBAR_STORAGE_KEY) === "1");
+  } catch (_) {
+    setSidebarCollapsed(false);
+  }
   bindNavigation();
   bindIntake();
   bindLibrary();
+  bindTranscriptReader();
   bindSettings();
   loadStatus();
   loadSettingsForm();

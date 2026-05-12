@@ -218,6 +218,22 @@
   </main>
 </div>
 
+<div id="reader-overlay" class="reader-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="reader-title">
+  <section class="reader-panel">
+    <header class="reader-head">
+      <div>
+        <h1 id="reader-title">字幕</h1>
+        <p id="reader-meta"></p>
+      </div>
+      <button id="reader-close" class="btn-secondary btn-small" type="button">关闭</button>
+    </header>
+    <div id="reader-content" class="reader-content"></div>
+    <footer class="reader-actions">
+      <button id="reader-open-folder" class="text-button" type="button">打开文件夹</button>
+    </footer>
+  </section>
+</div>
+
 <script src="/app.js"></script>
 </body>
 </html>
